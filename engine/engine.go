@@ -56,8 +56,9 @@ type GameEnv struct {
 	LastItemAttr byte
 
 	// Title screen state.
-	BannerOffset int // Scroll position for title banner.
-	TitleFrame   int // Frame counter for title screen.
+	BannerOffset    int // Scroll position for title banner.
+	TitleFrame      int // Frame counter for title screen.
+	titleBasePixels [AttrBufSize * 8]byte // Base title screen pixels (before Willy animation).
 
 	// Death/transition animation state.
 	AnimCounter int
@@ -103,7 +104,14 @@ func (e *GameEnv) initTitle() {
 	// Build title screen buffers.
 	// The title screen graphic data is in raw ZX Spectrum display file format
 	// (interleaved thirds). Convert to our linearised pixel buffer layout.
-	screen.SpectrumDisplayToLinear(data.TitleScreenPixels[:], e.WorkPixels[:])
+	screen.SpectrumDisplayToLinear(data.TitleScreenPixels[:], e.titleBasePixels[:])
+
+	// Copy base pixels to work buffer.
+	copy(e.WorkPixels[:], e.titleBasePixels[:])
+
+	// Draw initial Willy sprite at (9,29).
+	willySprite := data.WillySprites[2] // Frame 2 (WillySpriteData1 in original).
+	screen.DrawSprite(e.WorkPixels[:], 72, 29, willySprite[:], screen.DrawOverwrite)
 
 	// Attributes: top third from The Final Barrier cavern data,
 	// bottom two-thirds from BottomAttributes.
@@ -195,6 +203,8 @@ func (e *GameEnv) GetObservation() Observation {
 }
 
 // stepTitle handles one frame of the title screen.
+// In the original: the Blue Danube plays first with piano key animation,
+// then the banner scrolls with Willy animating at (9,29).
 func (e *GameEnv) stepTitle(act action.Action) {
 	e.TitleFrame++
 
@@ -203,6 +213,16 @@ func (e *GameEnv) stepTitle(act action.Action) {
 		e.startGame()
 		return
 	}
+
+	// Restore base pixels (clears previous Willy frame).
+	copy(e.WorkPixels[:], e.titleBasePixels[:])
+
+	// Animate Willy at (9,29) — pixel y=72, cellX=29.
+	// The original cycles through animation frames based on BannerOffset bits 1-2.
+	// Frame index: (BannerOffset & 0x06) >> 1 gives 0-3, shifted into sprite page.
+	animIdx := (e.BannerOffset & 0x06) >> 1 // 0, 1, 2, or 3
+	willySprite := data.WillySprites[animIdx]
+	screen.DrawSprite(e.WorkPixels[:], 72, 29, willySprite[:], screen.DrawOverwrite)
 
 	// Scroll the banner.
 	if e.TitleFrame%8 == 0 {
