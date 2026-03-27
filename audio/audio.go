@@ -39,6 +39,9 @@ func NewPlayer() *Player {
 
 	stream := newToneStream()
 	player := ctx.NewPlayer(stream)
+	// The oto player defaults to a 256KB internal buffer (~740ms latency!).
+	// Set it to 4096 bytes (~12ms) for near-instant response.
+	player.SetBufferSize(4096)
 	player.Play()
 
 	return &Player{
