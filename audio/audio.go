@@ -67,7 +67,10 @@ func (p *Player) PlayInGameNote(freq byte) {
 	// In-game loop: ~40 T-states per iteration.
 	hz := spectrumClock / (float64(freq) * 80.0)
 	// Note duration: 768 iterations * 40 T-states / 3500000 = ~8.8ms.
-	noteDuration := float64(sampleRate) * 0.0088 // ~388 samples at 44100 Hz.
+	// Original burst is ~9ms (768 * 40 T-states), but the Spectrum's speaker
+	// is much louder/harsher than our soft float32 output. Use 30ms for
+	// audibility while keeping the staccato character.
+	noteDuration := float64(sampleRate) * 0.030
 	durationSamples := int(noteDuration)
 	p.stream.playBurst(hz, durationSamples)
 }

@@ -113,7 +113,7 @@ var zxFont = [96][8]byte{
 // PrintMessage draws a string onto an Ebitengine image at the given pixel
 // coordinates using the ZX Spectrum font.
 func PrintMessage(target *ebiten.Image, x, y int, msg string, attr byte) {
-	ink := inkFromAttr(attr | 0x07)
+	ink := inkFromAttr(attr)
 	paper := paperFromAttr(attr)
 
 	for i, ch := range msg {

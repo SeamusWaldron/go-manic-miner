@@ -181,19 +181,17 @@ func (g *Game) drawGameOver() {
 }
 
 func (g *Game) renderHUD() {
-	var hudAttr byte
-	// Row 16 (y=128): Cavern name.
-	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, hudAttr)
+	// Row 16 (y=128): Cavern name — yellow text on black.
+	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, 0x06) // INK 6 (yellow).
 
-	// Row 17 (y=136): "AIR" + air bar.
-	screen.PrintMessage(g.display, 0, 136, "AIR", hudAttr)
+	// Row 17 (y=136): AIR bar with yellow background.
 	g.drawAirBar()
 
-	// Row 19 (y=152): High score and score.
+	// Row 19 (y=152): High score and score — yellow text on black.
 	highScoreText := "High Score " + string(g.env.HighScore[:]) + "   Score " + string(g.lastObs.Score[:])
-	screen.PrintMessage(g.display, 0, 152, highScoreText, hudAttr)
+	screen.PrintMessage(g.display, 0, 152, highScoreText, 0x06) // INK 6 (yellow).
 
-	// Row 20-21 (y=160-175): Lives display (small Willy sprites).
+	// Row 20-21 (y=160-175): Lives display.
 	g.drawLives()
 }
 
@@ -203,21 +201,34 @@ func (g *Game) drawAirBar() {
 		airLength = 0
 	}
 
-	// The air bar spans from column 4 (after "AIR ") to column 31.
-	// Total bar width = 27 cells. Remaining air fills from left, depleted area is red.
-	startX := 4 * 8 // Pixel x = 32.
-	barWidthCells := 27
-
 	red := color.RGBA{215, 0, 0, 255}
 	green := color.RGBA{0, 215, 0, 255}
 
-	for row := 0; row < 4; row++ {
+	// The entire AIR row uses attribute-style rendering:
+	// Filled cells (pixels=$FF) show INK colour = green.
+	// Empty cells (pixels=$00) show PAPER colour = red.
+	// This matches the Spectrum's attribute system for the air bar.
+
+	// First, fill the "AIR" text area (columns 0-3) with red background.
+	for y := 136; y < 144; y++ {
+		for x := 0; x < 4*8; x++ {
+			g.display.Set(x, y, red)
+		}
+	}
+	// Draw "AIR" text in white on red background.
+	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17) // INK 7 (white), PAPER 2 (red).
+
+	// Draw the bar area (columns 4-31).
+	startX := 4 * 8
+	barWidthCells := 28 // Columns 4 through 31.
+
+	for row := 0; row < 8; row++ {
 		for cell := 0; cell < barWidthCells; cell++ {
 			var c color.RGBA
 			if cell < airLength {
-				c = green // Remaining air.
+				c = green // Remaining air (INK on filled pixels).
 			} else {
-				c = red // Depleted air.
+				c = red // Depleted air (PAPER on empty pixels).
 			}
 			for bit := 0; bit < 8; bit++ {
 				x := startX + cell*8 + bit
@@ -235,15 +246,20 @@ func (g *Game) drawLives() {
 	if lives <= 0 {
 		return
 	}
-	// Draw small Willy sprites at the bottom of the screen.
-	// In the original, lives are drawn at row 20 (y=160), 2 cells apart.
-	// We use the current music note index to pick the animation frame.
-	animIdx := (g.env.MusicNoteIndex >> 2) & 3
+
+	// Original: MusicNoteIndex RLCA x3, AND $60 gives frame offset 0/32/64/96.
+	// Frame = (MusicNoteIndex << 3) & 0x60, then divide by 32 = frame 0-3.
+	animIdx := (g.env.MusicNoteIndex * 8 / 32) & 3
 	spriteData := data.WillySprites[animIdx]
 
+	// Cyan colour matching the reference screenshot.
+	cyan := color.RGBA{0, 215, 215, 255}
+
 	for i := 0; i < lives && i < 8; i++ {
-		px := i * 16 // Each Willy is 16 pixels wide.
-		// Draw directly to the display image.
+		// Original: lives start at $50A0, each 2 cells apart (INC HL twice).
+		// $50A0 = row 20, column 0 in bottom third. Each life shifts 2 columns right.
+		px := i * 16
+
 		for row := 0; row < 16; row++ {
 			leftByte := spriteData[row*2]
 			rightByte := spriteData[row*2+1]
@@ -252,7 +268,7 @@ func (g *Game) drawLives() {
 					x := px + (7 - bit)
 					y := 160 + row
 					if x < ScreenWidth && y < ScreenHeight {
-						g.display.Set(x, y, color.RGBA{215, 215, 0, 255}) // Yellow.
+						g.display.Set(x, y, cyan)
 					}
 				}
 			}
@@ -261,7 +277,7 @@ func (g *Game) drawLives() {
 					x := px + 8 + (7 - bit)
 					y := 160 + row
 					if x < ScreenWidth && y < ScreenHeight {
-						g.display.Set(x, y, color.RGBA{215, 215, 0, 255})
+						g.display.Set(x, y, cyan)
 					}
 				}
 			}
