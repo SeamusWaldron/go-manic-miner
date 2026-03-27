@@ -135,7 +135,8 @@ type toneStream struct {
 	tuneNoteIdx     int
 	tuneSamplesLeft int // Samples remaining for current note.
 
-	// Burst mode: play a tone for a fixed number of samples, then silence.
+	// Burst mode (SFX): plays its own frequency, overriding other sources.
+	burstFreq        float64
 	burstSamplesLeft int
 
 	// In-game music loop (managed internally by Read).
@@ -161,8 +162,7 @@ func (s *toneStream) setTone(f1, f2 float64) {
 
 func (s *toneStream) playBurst(hz float64, samples int) {
 	s.mu.Lock()
-	s.freq1 = hz
-	s.freq2 = 0
+	s.burstFreq = hz
 	s.burstSamplesLeft = samples
 	s.mu.Unlock()
 }
@@ -296,12 +296,18 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 			s.mu.Unlock()
 		}
 
-		// Burst mode: count down and silence when expired.
-		if burst >= 0 {
-			burst--
-			if burst <= 0 {
-				f1 = 0
+		// Burst mode (SFX): overrides all other audio when active.
+		if burst > 0 {
+			s.mu.Lock()
+			s.burstSamplesLeft--
+			burst = s.burstSamplesLeft
+			bf := s.burstFreq
+			s.mu.Unlock()
+			if burst > 0 {
+				f1 = bf
 				f2 = 0
+			} else {
+				// Burst ended — restore to whatever igm/tune was playing.
 			}
 		}
 

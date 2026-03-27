@@ -142,17 +142,14 @@ func (g *Game) updateAudio() {
 		if g.audioPlayer.IsTunePlaying() {
 			g.audioPlayer.Silence()
 		}
-		// Jump/fall sound effects: stop music, play SFX.
+		// Start in-game music if not already playing.
+		if g.env.MusicEnabled && !g.audioPlayer.IsInGameMusicPlaying() {
+			g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
+		}
+		// Jump/fall SFX: temporarily override the music output via burst.
+		// The music keeps advancing internally — no stop/restart.
 		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
-			g.audioPlayer.StopInGameMusic()
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
-		} else if g.env.MusicEnabled {
-			// Start in-game music if not already playing.
-			if !g.audioPlayer.IsInGameMusicPlaying() {
-				g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
-			}
-		} else {
-			g.audioPlayer.StopInGameMusic()
 		}
 
 	default:
