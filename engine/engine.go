@@ -56,9 +56,13 @@ type GameEnv struct {
 	LastItemAttr byte
 
 	// Title screen state.
-	BannerOffset    int // Scroll position for title banner.
-	TitleFrame      int // Frame counter for title screen.
-	titleBasePixels [AttrBufSize * 8]byte // Base title screen pixels (before Willy animation).
+	BannerOffset    int  // Scroll position for title banner.
+	TitleFrame      int  // Frame counter for title screen.
+	TitlePhase      int  // 0 = tune/piano, 1 = banner scroll.
+	TuneNoteIndex   int  // Current note in the title tune.
+	TuneFrameCount  int  // Frames spent on current note.
+	titleBasePixels [AttrBufSize * 8]byte // Base title pixels.
+	titleBaseAttrs  [AttrBufSize]byte     // Base title attributes.
 
 	// Death/transition animation state.
 	AnimCounter int
@@ -106,20 +110,25 @@ func (e *GameEnv) initTitle() {
 	// (interleaved thirds). Convert to our linearised pixel buffer layout.
 	screen.SpectrumDisplayToLinear(data.TitleScreenPixels[:], e.titleBasePixels[:])
 
-	// Copy base pixels to work buffer.
-	copy(e.WorkPixels[:], e.titleBasePixels[:])
-
-	// Draw initial Willy sprite at (9,29).
-	willySprite := data.WillySprites[2] // Frame 2 (WillySpriteData1 in original).
-	screen.DrawSprite(e.WorkPixels[:], 72, 29, willySprite[:], screen.DrawOverwrite)
-
 	// Attributes: top third from The Final Barrier cavern data,
 	// bottom two-thirds from BottomAttributes.
 	finalBarrier := cavern.Load(19)
 	if finalBarrier != nil {
-		copy(e.WorkAttr[0:256], finalBarrier.Attributes[0:256])
+		copy(e.titleBaseAttrs[0:256], finalBarrier.Attributes[0:256])
 	}
-	copy(e.WorkAttr[256:], data.TitleScreenBottomAttrs[:])
+	copy(e.titleBaseAttrs[256:], data.TitleScreenBottomAttrs[:])
+
+	// Copy base to work buffers.
+	copy(e.WorkPixels[:], e.titleBasePixels[:])
+	copy(e.WorkAttr[:], e.titleBaseAttrs[:])
+
+	// Draw initial Willy sprite at (9,29) — pixel y=72.
+	willySprite := data.WillySprites[2]
+	screen.DrawSprite(e.WorkPixels[:], 72, 29, willySprite[:], screen.DrawOverwrite)
+
+	e.TitlePhase = 0
+	e.TuneNoteIndex = 0
+	e.TuneFrameCount = 0
 }
 
 // Reset initialises a cavern for gameplay. Returns the initial observation.
@@ -203,8 +212,8 @@ func (e *GameEnv) GetObservation() Observation {
 }
 
 // stepTitle handles one frame of the title screen.
-// In the original: the Blue Danube plays first with piano key animation,
-// then the banner scrolls with Willy animating at (9,29).
+// Phase 0: Piano keys animate through the Blue Danube tune data.
+// Phase 1: Banner scrolls with Willy animating at (9,29).
 func (e *GameEnv) stepTitle(act action.Action) {
 	e.TitleFrame++
 
@@ -214,27 +223,95 @@ func (e *GameEnv) stepTitle(act action.Action) {
 		return
 	}
 
+	if e.TitlePhase == 0 {
+		e.stepTitleTune()
+	} else {
+		e.stepTitleBanner()
+	}
+}
+
+// stepTitleTune animates piano keys through the Blue Danube.
+func (e *GameEnv) stepTitleTune() {
+	tuneData := data.TitleTuneData[:]
+
+	// Each note is 3 bytes: duration, freq1, freq2. $FF = end.
+	noteOffset := e.TuneNoteIndex * 3
+	if noteOffset+2 >= len(tuneData) || tuneData[noteOffset] == 0xFF {
+		// Tune finished — switch to banner phase.
+		e.TitlePhase = 1
+		e.BannerOffset = 0
+		// Reset piano keys to normal.
+		copy(e.WorkAttr[:], e.titleBaseAttrs[:])
+		return
+	}
+
+	duration := tuneData[noteOffset]
+	freq1 := tuneData[noteOffset+1]
+	freq2 := tuneData[noteOffset+2]
+
+	// Reset attributes to base (clears previous key highlights).
+	copy(e.WorkAttr[:], e.titleBaseAttrs[:])
+
+	// Highlight the two piano keys for this note.
+	// Key index = 31 - ((freq - 8) / 8), mapped to attribute row 15, columns 0-31.
+	if freq1 > 0 {
+		key1 := pianoKeyColumn(freq1)
+		if key1 >= 0 && key1 < 32 {
+			e.WorkAttr[15*32+key1] = 80 // INK 0, PAPER 2, BRIGHT 1.
+		}
+	}
+	if freq2 > 0 {
+		key2 := pianoKeyColumn(freq2)
+		if key2 >= 0 && key2 < 32 {
+			e.WorkAttr[15*32+key2] = 40 // INK 0, PAPER 5.
+		}
+	}
+
+	// Advance to next note based on duration.
+	// Original duration is a loop count; we approximate as frames.
+	// Duration $50=80 ≈ 6 frames, $32=50 ≈ 4 frames, $64=100 ≈ 8 frames.
+	framesPerNote := int(duration) / 13
+	if framesPerNote < 1 {
+		framesPerNote = 1
+	}
+
+	e.TuneFrameCount++
+	if e.TuneFrameCount >= framesPerNote {
+		e.TuneFrameCount = 0
+		e.TuneNoteIndex++
+	}
+}
+
+// pianoKeyColumn converts a frequency parameter to a piano key column (0-31).
+// Matches the original CalcAFAForPianoKey: key = 31 - ((freq - 8) / 8).
+func pianoKeyColumn(freq byte) int {
+	if freq < 8 {
+		return -1
+	}
+	return 31 - int((freq-8)/8)
+}
+
+// stepTitleBanner scrolls the banner and animates Willy.
+func (e *GameEnv) stepTitleBanner() {
 	// Restore base pixels (clears previous Willy frame).
 	copy(e.WorkPixels[:], e.titleBasePixels[:])
+	// Restore base attributes (clears any leftover piano highlights).
+	copy(e.WorkAttr[:], e.titleBaseAttrs[:])
 
 	// Animate Willy at (9,29) — pixel y=72, cellX=29.
-	// The original cycles through animation frames based on BannerOffset bits 1-2.
-	// Frame index: (BannerOffset & 0x06) >> 1 gives 0-3, shifted into sprite page.
-	animIdx := (e.BannerOffset & 0x06) >> 1 // 0, 1, 2, or 3
+	// Animation frame cycles based on BannerOffset bits 1-2.
+	animIdx := (e.BannerOffset & 0x06) >> 1
 	willySprite := data.WillySprites[animIdx]
 	screen.DrawSprite(e.WorkPixels[:], 72, 29, willySprite[:], screen.DrawOverwrite)
 
-	// Scroll the banner.
-	if e.TitleFrame%8 == 0 {
-		e.BannerOffset++
-		if e.BannerOffset >= 224 {
-			// Banner finished scrolling — enter demo mode.
-			e.State = StateDemo
-			e.DemoCounter = 64
-			e.Reset(e.CavernNumber)
-			e.State = StateDemo
-			return
-		}
+	// Advance banner every frame (original pauses ~0.1s per character).
+	e.BannerOffset++
+	if e.BannerOffset >= 224 {
+		// Banner finished — enter demo mode.
+		e.State = StateDemo
+		e.DemoCounter = 64
+		e.Reset(e.CavernNumber)
+		e.State = StateDemo
 	}
 }
 
