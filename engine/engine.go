@@ -26,6 +26,11 @@ type GameEnv struct {
 	Items          []entity.Item
 	Portal         *entity.Portal
 
+	// Special entities (cavern-specific).
+	Eugene  *entity.Eugene
+	Kong    *entity.Kong
+	Skylabs []entity.Skylab
+
 	Score        [10]byte // ASCII digits. [4]-[9] are the visible 6.
 	HighScore    [6]byte  // ASCII digits.
 	Lives        int
@@ -77,6 +82,20 @@ func (e *GameEnv) Reset(cavernNum int) Observation {
 	e.LastItemAttr = 0xFF
 	e.levelDone = false
 	e.died = false
+
+	// Initialise special entities based on cavern number.
+	e.Eugene = nil
+	e.Kong = nil
+	e.Skylabs = nil
+	if cavernNum == 4 {
+		e.Eugene = entity.NewEugene()
+	}
+	if cavernNum == 7 || cavernNum == 11 {
+		e.Kong = entity.NewKong()
+	}
+	if cavernNum == 13 {
+		e.Skylabs = entity.NewSkylabs(e.CurrentCavern)
+	}
 
 	return e.buildObservation()
 }
@@ -154,6 +173,24 @@ func (e *GameEnv) step(act action.Action) {
 	e.LastItemAttr = entity.DrawAndCollectItems(e.Items, e.CurrentCavern,
 		e.WorkAttr[:], e.WorkPixels[:], e.Score[:])
 
+	// Special entity: Eugene (cavern 4).
+	if e.Eugene != nil && e.Willy.Alive {
+		if e.Eugene.MoveAndDraw(e.CurrentCavern, e.LastItemAttr, e.GameClock,
+			e.WorkAttr[:], e.WorkPixels[:]) {
+			e.Willy.Kill()
+		}
+	}
+
+	// Special entity: Skylabs (cavern 13) — replaces vertical guardians.
+	if e.Skylabs != nil {
+		if e.Willy.Alive {
+			if entity.MoveAndDrawSkylabs(e.Skylabs, e.CurrentCavern,
+				e.WorkAttr[:], e.WorkPixels[:]) {
+				e.Willy.Kill()
+			}
+		}
+	}
+
 	// Move and draw vertical guardians (caverns >= 8, except 13 = Skylabs).
 	if e.CavernNumber >= 8 && e.CavernNumber != 13 {
 		entity.MoveVertGuardians(e.VertGuardians)
@@ -162,6 +199,22 @@ func (e *GameEnv) step(act action.Action) {
 				e.WorkAttr[:], e.WorkPixels[:]) {
 				e.Willy.Kill()
 			}
+		}
+	}
+
+	// Special entity: Kong Beast (caverns 7, 11).
+	if e.Kong != nil && e.Willy.Alive {
+		if e.Kong.MoveAndDraw(e.CurrentCavern, e.GameClock,
+			e.WorkAttr[:], e.WorkPixels[:], e.Score[:]) {
+			e.Willy.Kill()
+		}
+	}
+
+	// Special entity: Light Beam (cavern 18).
+	if e.CavernNumber == 18 && e.Willy.Alive {
+		extraDrain := entity.DrawLightBeam(e.CurrentCavern, e.WorkAttr[:])
+		for i := 0; i < extraDrain; i++ {
+			e.decreaseAir()
 		}
 	}
 
