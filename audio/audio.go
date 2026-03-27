@@ -93,10 +93,12 @@ func (p *Player) IsInGameMusicPlaying() bool {
 	return p.stream.igmPlaying
 }
 
-// StopInGameMusic stops the in-game music.
+// StopInGameMusic stops the in-game music and silences output.
 func (p *Player) StopInGameMusic() {
 	p.stream.mu.Lock()
 	p.stream.igmPlaying = false
+	p.stream.freq1 = 0
+	p.stream.freq2 = 0
 	p.stream.mu.Unlock()
 }
 
