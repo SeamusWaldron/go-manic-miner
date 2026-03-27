@@ -94,24 +94,20 @@ func (p *Player) StopInGameMusic() {
 	p.stream.mu.Unlock()
 }
 
-// PlaySFX plays a short sound effect (jump/fall). Pitch is the D parameter
-// from the original Z80 code. The sound plays as a short burst.
+// PlaySFX plays a sound effect (jump/fall). Pitch is the D parameter
+// from the original Z80 code.
 func (p *Player) PlaySFX(pitch int) {
 	if pitch <= 0 {
 		return
 	}
-	// Convert D parameter to Hz. Original loop: OUT, XOR, LD B,D, DJNZ.
-	// Half period = D * 13 T-states (DJNZ loop). Full cycle = D * 26 T.
-	// Hz = 3500000 / (D * 26).
+	// Convert D parameter to Hz.
+	// Original: half period = D * 13 T-states, full cycle = D * 26 T.
 	hz := spectrumClock / (float64(pitch) * 26.0)
-	// Duration: C=32 outer loops, each D inner loops.
-	// Total = 32 * (13*D + 33) T-states. Convert to samples.
-	totalT := 32.0 * (13.0*float64(pitch) + 33.0)
-	durSecs := totalT / spectrumClock
-	dur := int(durSecs * float64(sampleRate))
-	if dur < 100 {
-		dur = 100
-	}
+	// Original burst is ~8ms (too short for software playback — sounds like
+	// a click). Use 40ms which gives enough cycles for audible pitch while
+	// keeping the percussive character. At 16 FPS (62ms frames), this leaves
+	// a ~22ms gap between successive jump/fall notes.
+	dur := sampleRate * 40 / 1000 // 40ms = 1764 samples.
 	p.stream.playBurst(hz, dur)
 }
 
