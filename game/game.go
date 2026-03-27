@@ -242,17 +242,23 @@ func (g *Game) drawAirBar() {
 }
 
 func (g *Game) drawLives() {
+	// Clear the lives area (y=160-175) every frame.
+	for y := 160; y < 176; y++ {
+		for x := 0; x < ScreenWidth; x++ {
+			g.display.Set(x, y, color.Black)
+		}
+	}
+
 	lives := g.env.Lives
 	if lives <= 0 {
 		return
 	}
 
-	// Original: MusicNoteIndex RLCA x3, AND $60 gives frame offset 0/32/64/96.
-	// Frame = (MusicNoteIndex << 3) & 0x60, then divide by 32 = frame 0-3.
-	animIdx := (g.env.MusicNoteIndex * 8 / 32) & 3
+	// Original: (MusicNoteIndex RLCA x3) AND $60 gives 0, 32, 64, or 96.
+	// Dividing by 32 gives frame 0-3.
+	animIdx := ((g.env.MusicNoteIndex << 3) & 0x60) >> 5
 	spriteData := data.WillySprites[animIdx]
 
-	// Cyan colour matching the reference screenshot.
 	cyan := color.RGBA{0, 215, 215, 255}
 
 	for i := 0; i < lives && i < 8; i++ {

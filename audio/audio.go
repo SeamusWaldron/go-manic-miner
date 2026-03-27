@@ -57,22 +57,15 @@ func (p *Player) IsTunePlaying() bool {
 }
 
 // PlayInGameNote plays a single in-game music note as a short burst.
-// In the original, each note plays for B*C iterations (~768 * 40 T-states = 8.8ms)
-// then silence for the rest of the frame. This gives the staccato beeper sound.
+// PlayInGameNote sustains a tone until the next call changes it.
+// The game loop updates the frequency each frame, creating a continuous melody.
 func (p *Player) PlayInGameNote(freq byte) {
 	if freq == 0 {
 		p.stream.setTone(0, 0)
 		return
 	}
-	// In-game loop: ~40 T-states per iteration.
 	hz := spectrumClock / (float64(freq) * 80.0)
-	// Note duration: 768 iterations * 40 T-states / 3500000 = ~8.8ms.
-	// Original burst is ~9ms (768 * 40 T-states), but the Spectrum's speaker
-	// is much louder/harsher than our soft float32 output. Use 30ms for
-	// audibility while keeping the staccato character.
-	noteDuration := float64(sampleRate) * 0.030
-	durationSamples := int(noteDuration)
-	p.stream.playBurst(hz, durationSamples)
+	p.stream.setTone(hz, 0)
 }
 
 // Silence stops all audio output.
