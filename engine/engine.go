@@ -461,12 +461,6 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 	// Advance in-game music. Original increments by 1 per frame (0-255 wrapping).
 	e.MusicNoteIndex = (e.MusicNoteIndex + 1) & 255
 
-	// Item collected sound (short high blip).
-	if e.scoreToInt() > e.prevScoreInt && e.SoundRequest == 0 {
-		e.SoundRequest = 3 // Item collected.
-		e.SoundPitch = 8   // High pitch.
-	}
-
 	// Check death.
 	if !e.Willy.Alive {
 		e.died = true

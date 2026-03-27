@@ -161,11 +161,8 @@ func (g *Game) updateAudio() {
 			g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
 		}
 		// Sound effects: temporarily override the music output via burst.
-		switch g.lastObs.SoundRequest {
-		case 1, 2: // Jump / fall.
+		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
-		case 3: // Item collected — short high blip.
-			g.audioPlayer.PlaySFX(8)
 		}
 
 	case engine.StateDying:
