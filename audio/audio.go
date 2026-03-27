@@ -26,6 +26,9 @@ func NewPlayer() *Player {
 	ctx := audio.NewContext(sampleRate)
 	stream := newToneStream()
 	player, _ := ctx.NewPlayerF32(stream)
+	// Small buffer for low latency (~23ms). Larger buffers cause audible
+	// delay between game events and their sounds.
+	player.SetBufferSize(1024 * 2 * 4) // 1024 stereo float32 samples.
 	player.Play()
 
 	return &Player{
@@ -243,15 +246,14 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 	numSamples := len(buf) / bytesPerSample
 	written := 0
 
-	s.mu.Lock()
-	f1 := s.freq1
-	f2 := s.freq2
-	playing := s.tunePlaying
-	igm := s.igmPlaying
-	burst := s.burstSamplesLeft
-	s.mu.Unlock()
-
 	for i := 0; i < numSamples; i++ {
+		s.mu.Lock()
+		f1 := s.freq1
+		f2 := s.freq2
+		playing := s.tunePlaying
+		igm := s.igmPlaying
+		burst := s.burstSamplesLeft
+		s.mu.Unlock()
 		// In-game music: manage note timing internally.
 		if igm {
 			s.mu.Lock()
@@ -300,15 +302,9 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 		if burst > 0 {
 			s.mu.Lock()
 			s.burstSamplesLeft--
-			burst = s.burstSamplesLeft
-			bf := s.burstFreq
 			s.mu.Unlock()
-			if burst > 0 {
-				f1 = bf
-				f2 = 0
-			} else {
-				// Burst ended — restore to whatever igm/tune was playing.
-			}
+			f1 = s.burstFreq
+			f2 = 0
 		}
 
 		var sample float32
