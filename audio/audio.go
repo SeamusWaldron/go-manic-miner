@@ -26,9 +26,9 @@ func NewPlayer() *Player {
 	ctx := audio.NewContext(sampleRate)
 	stream := newToneStream()
 	player, _ := ctx.NewPlayerF32(stream)
-	// Small buffer for low latency (~23ms). Larger buffers cause audible
-	// delay between game events and their sounds.
-	player.SetBufferSize(1024 * 2 * 4) // 1024 stereo float32 samples.
+	// Buffer size balances latency vs crackling.
+	// 2048 stereo float32 samples = ~46ms latency.
+	player.SetBufferSize(2048 * 2 * 4)
 	player.Play()
 
 	return &Player{
@@ -246,14 +246,15 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 	numSamples := len(buf) / bytesPerSample
 	written := 0
 
+	s.mu.Lock()
+	f1 := s.freq1
+	f2 := s.freq2
+	playing := s.tunePlaying
+	igm := s.igmPlaying
+	burst := s.burstSamplesLeft
+	s.mu.Unlock()
+
 	for i := 0; i < numSamples; i++ {
-		s.mu.Lock()
-		f1 := s.freq1
-		f2 := s.freq2
-		playing := s.tunePlaying
-		igm := s.igmPlaying
-		burst := s.burstSamplesLeft
-		s.mu.Unlock()
 		// In-game music: manage note timing internally.
 		if igm {
 			s.mu.Lock()
@@ -300,9 +301,7 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 
 		// Burst mode (SFX): overrides all other audio when active.
 		if burst > 0 {
-			s.mu.Lock()
-			s.burstSamplesLeft--
-			s.mu.Unlock()
+			burst--
 			f1 = s.burstFreq
 			f2 = 0
 		}
@@ -341,6 +340,11 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 
 		written += bytesPerSample
 	}
+
+	// Write back burst counter.
+	s.mu.Lock()
+	s.burstSamplesLeft = burst
+	s.mu.Unlock()
 
 	return written, nil
 }

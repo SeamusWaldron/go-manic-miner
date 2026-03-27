@@ -329,32 +329,39 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 	// Move horizontal guardians.
 	entity.MoveHorizGuardians(e.HorizGuardians, e.GameClock)
 
-	// Update Willy.
-	e.Willy.Update(act, e.CurrentCavern, e.EmptyAttr[:], e.EmptyPixels[:], e.EmptyAttr[:])
-
-	// Set sound request based on Willy's state.
-	// Original: jump sound at MW1x2 (D=8*(1+ABS(J-8)), C=32).
-	// Fall sound at MW1x6 (D=16*airborne, C=32).
+	// Capture pre-update airborne state for sound effects.
+	// In the original, jump/fall sounds play INSIDE MoveWilly1 (during the
+	// jump/fall processing), not after. We capture the state before Update
+	// and set the sound request accordingly.
 	e.SoundRequest = 0
 	e.SoundPitch = 0
 	if e.Willy != nil && e.Willy.Alive {
-		if e.Willy.Airborne == 1 && e.Willy.JumpCount >= 1 && e.Willy.JumpCount <= 12 {
-			j := e.Willy.JumpCount
+		if e.Willy.Airborne == 1 {
+			// Jump sound plays every frame during the jump (JC 0-17).
+			// Original calculates D after incrementing JC, so use JC+1.
+			j := e.Willy.JumpCount + 1
+			if j > 18 {
+				j = 18
+			}
 			absJm8 := j - 8
 			if absJm8 < 0 {
 				absJm8 = -absJm8
 			}
 			e.SoundRequest = 1
-			e.SoundPitch = 8 * (1 + absJm8) // D value from original.
+			e.SoundPitch = 8 * (1 + absJm8)
 		} else if e.Willy.Airborne >= 2 && e.Willy.Airborne < 255 {
-			e.SoundRequest = 2
-			d := e.Willy.Airborne * 16
+			// Fall sound.
+			d := (e.Willy.Airborne + 1) * 16 // Original increments then calculates.
 			if d > 255 {
 				d = 255
 			}
+			e.SoundRequest = 2
 			e.SoundPitch = d
 		}
 	}
+
+	// Update Willy.
+	e.Willy.Update(act, e.CurrentCavern, e.EmptyAttr[:], e.EmptyPixels[:], e.EmptyAttr[:])
 
 	// Re-copy after crumbling.
 	copy(e.WorkAttr[:], e.EmptyAttr[:])
