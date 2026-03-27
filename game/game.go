@@ -224,7 +224,7 @@ func (g *Game) drawAirBar() {
 	for y := 136; y < 144; y++ {
 		for col := 0; col < 32; col++ {
 			var c color.RGBA
-			if col >= 4 && col <= 30 {
+			if col >= 4 {
 				c = green
 			} else {
 				c = red
