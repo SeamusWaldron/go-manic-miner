@@ -41,7 +41,7 @@ func New() *Game {
 		display:     ebiten.NewImage(ScreenWidth, ScreenHeight),
 		audioPlayer: audio.NewPlayer(),
 		lastObs:     env.GetObservation(),
-		musicStep:   1,
+		musicStep:   60, // Default note duration in ms. Adjust with -/=.
 	}
 	return g
 }
@@ -93,25 +93,24 @@ func (g *Game) logicTick() {
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 
-	// Music speed tuning: -/= adjust notes per frame (audio only, not lives).
+	// Music tempo tuning: -/= adjust note duration (audio only, not gameplay).
 	if g.keyDebounce > 0 {
 		g.keyDebounce--
 	}
 	if g.keyDebounce == 0 {
-		if ebiten.IsKeyPressed(ebiten.KeyMinus) && g.musicStep > 1 {
-			g.musicStep--
-			g.keyDebounce = 8
-			fmt.Printf("Music step: %d notes/frame\n", g.musicStep)
+		if ebiten.IsKeyPressed(ebiten.KeyMinus) && g.musicStep < 200 {
+			g.musicStep += 5
+			g.keyDebounce = 5
+			g.audioPlayer.SetInGameMusicTempo(g.musicStep)
+			fmt.Printf("Music note duration: %dms\n", g.musicStep)
 		}
-		if ebiten.IsKeyPressed(ebiten.KeyEqual) {
-			g.musicStep++
-			g.keyDebounce = 8
-			fmt.Printf("Music step: %d notes/frame\n", g.musicStep)
+		if ebiten.IsKeyPressed(ebiten.KeyEqual) && g.musicStep > 10 {
+			g.musicStep -= 5
+			g.keyDebounce = 5
+			g.audioPlayer.SetInGameMusicTempo(g.musicStep)
+			fmt.Printf("Music note duration: %dms\n", g.musicStep)
 		}
 	}
-
-	// Advance the separate music counter.
-	g.musicCounter = (g.musicCounter + g.musicStep) & 255
 
 	// Handle audio based on engine state.
 	g.updateAudio()
@@ -143,15 +142,17 @@ func (g *Game) updateAudio() {
 		if g.audioPlayer.IsTunePlaying() {
 			g.audioPlayer.Silence()
 		}
-		// Jump/fall sound effects take priority over music.
+		// Jump/fall sound effects: stop music, play SFX.
 		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
+			g.audioPlayer.StopInGameMusic()
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
 		} else if g.env.MusicEnabled {
-			noteIdx := (g.musicCounter & 126) >> 1
-			freq := data.InGameTuneData[noteIdx]
-			g.audioPlayer.PlayInGameNote(freq)
+			// Start in-game music if not already playing.
+			if !g.audioPlayer.IsInGameMusicPlaying() {
+				g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
+			}
 		} else {
-			g.audioPlayer.Silence()
+			g.audioPlayer.StopInGameMusic()
 		}
 
 	default:

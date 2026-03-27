@@ -57,18 +57,38 @@ func (p *Player) IsTunePlaying() bool {
 }
 
 // PlayInGameNote plays a single in-game music note as a short burst.
-// PlayInGameNote plays a short burst matching the original's ~8.8ms duration.
-// The original plays 768 iterations of a ~40 T-state loop = 30,720 T = 8.8ms.
-// This staccato articulation is what makes the tune sound fast and energetic.
-func (p *Player) PlayInGameNote(freq byte) {
-	if freq == 0 {
-		p.stream.setTone(0, 0)
-		return
+// StartInGameMusic begins the in-game music loop. The audio stream handles
+// note advancement internally at the correct tempo. noteDurationMs controls
+// how long each note plays (in milliseconds).
+func (p *Player) StartInGameMusic(tuneData []byte, noteDurationMs int) {
+	p.stream.startInGameMusic(tuneData, noteDurationMs)
+}
+
+// SetInGameMusicTempo changes the note duration while playing.
+func (p *Player) SetInGameMusicTempo(noteDurationMs int) {
+	p.stream.mu.Lock()
+	if noteDurationMs < 5 {
+		noteDurationMs = 5
 	}
-	hz := spectrumClock / (float64(freq) * 80.0)
-	// 8.8ms at 44100 Hz = 388 samples. Use 600 samples (~14ms) for slightly
-	// better pitch audibility while keeping the staccato character.
-	p.stream.playBurst(hz, 600)
+	p.stream.igmNoteSamples = sampleRate * noteDurationMs / 1000
+	p.stream.igmSilenceSamples = p.stream.igmNoteSamples / 2 // 33% silence gap.
+	p.stream.mu.Unlock()
+}
+
+// IsInGameMusicPlaying returns true if in-game music is active.
+func (p *Player) IsInGameMusicPlaying() bool {
+	p.stream.mu.Lock()
+	defer p.stream.mu.Unlock()
+	return p.stream.igmPlaying
+}
+
+// StopInGameMusic stops the in-game music loop.
+func (p *Player) StopInGameMusic() {
+	p.stream.mu.Lock()
+	p.stream.igmPlaying = false
+	p.stream.freq1 = 0
+	p.stream.freq2 = 0
+	p.stream.mu.Unlock()
 }
 
 // PlaySFX plays a short sound effect (jump/fall). Pitch is the D parameter
@@ -95,6 +115,7 @@ func (p *Player) PlaySFX(pitch int) {
 // Silence stops all audio output.
 func (p *Player) Silence() {
 	p.stream.stopTune()
+	p.StopInGameMusic()
 	p.stream.setTone(0, 0)
 }
 
@@ -116,6 +137,14 @@ type toneStream struct {
 
 	// Burst mode: play a tone for a fixed number of samples, then silence.
 	burstSamplesLeft int
+
+	// In-game music loop (managed internally by Read).
+	igmPlaying        bool
+	igmData           []byte  // 64-byte note frequency table.
+	igmNoteIdx        int     // 0-255 counter (mapped via AND 126 >> 1).
+	igmNoteSamples    int     // Samples per note (controls tempo).
+	igmSamplesLeft    int     // Samples remaining for current note burst.
+	igmSilenceSamples int     // Silence samples between notes.
 }
 
 func newToneStream() *toneStream {
@@ -135,6 +164,24 @@ func (s *toneStream) playBurst(hz float64, samples int) {
 	s.freq1 = hz
 	s.freq2 = 0
 	s.burstSamplesLeft = samples
+	s.mu.Unlock()
+}
+
+func (s *toneStream) startInGameMusic(tuneData []byte, noteDurationMs int) {
+	s.mu.Lock()
+	s.igmData = tuneData
+	s.igmNoteIdx = 0
+	s.igmPlaying = true
+	s.igmNoteSamples = sampleRate * noteDurationMs / 1000
+	s.igmSilenceSamples = s.igmNoteSamples / 2
+	s.igmSamplesLeft = s.igmNoteSamples
+	s.tunePlaying = false // Stop title tune if playing.
+	// Load first note.
+	noteFreq := tuneData[(s.igmNoteIdx&126)>>1]
+	if noteFreq > 0 {
+		s.freq1 = spectrumClock / (float64(noteFreq) * 80.0)
+	}
+	s.freq2 = 0
 	s.mu.Unlock()
 }
 
@@ -200,11 +247,42 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 	f1 := s.freq1
 	f2 := s.freq2
 	playing := s.tunePlaying
+	igm := s.igmPlaying
 	burst := s.burstSamplesLeft
 	s.mu.Unlock()
 
 	for i := 0; i < numSamples; i++ {
-		// If playing a tune, check if current note has expired.
+		// In-game music: manage note timing internally.
+		if igm {
+			s.mu.Lock()
+			s.igmSamplesLeft--
+			if s.igmSamplesLeft <= 0 {
+				s.igmNoteIdx = (s.igmNoteIdx + 1) & 255
+				noteIdx := (s.igmNoteIdx & 126) >> 1
+				if noteIdx < len(s.igmData) {
+					noteFreq := s.igmData[noteIdx]
+					if noteFreq > 0 {
+						s.freq1 = spectrumClock / (float64(noteFreq) * 80.0)
+					} else {
+						s.freq1 = 0
+					}
+				}
+				s.freq2 = 0
+				s.igmSamplesLeft = s.igmNoteSamples + s.igmSilenceSamples
+				f1 = s.freq1
+				f2 = 0
+			} else if s.igmSamplesLeft <= s.igmSilenceSamples {
+				// In the silence gap between notes.
+				f1 = 0
+				f2 = 0
+			} else {
+				f1 = s.freq1
+				f2 = 0
+			}
+			s.mu.Unlock()
+		}
+
+		// If playing a title tune, check if current note has expired.
 		if playing {
 			s.mu.Lock()
 			s.tuneSamplesLeft--
