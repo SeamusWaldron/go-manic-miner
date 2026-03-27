@@ -127,6 +127,9 @@ func (s *toneStream) startTune(data []byte) {
 func (s *toneStream) stopTune() {
 	s.mu.Lock()
 	s.tunePlaying = false
+	s.freq1 = 0
+	s.freq2 = 0
+	s.tuneSamplesLeft = 0
 	s.mu.Unlock()
 }
 
