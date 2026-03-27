@@ -3,6 +3,7 @@
 package game
 
 import (
+	"fmt"
 	"image/color"
 
 	"manicminer/audio"
@@ -25,17 +26,22 @@ type Game struct {
 	lastObs     engine.Observation
 	cheat       CheatState
 
+	// Separate music counter (independent of MusicNoteIndex used for lives).
+	musicCounter int
+	musicStep    int // Notes per frame. Adjust with -/= keys.
+	keyDebounce  int
 }
 
 // New creates a new Game instance for human play.
 func New() *Game {
 	env := engine.NewGameEnv()
 	g := &Game{
-		env:            env,
-		renderer:       screen.NewRenderer(),
-		display:        ebiten.NewImage(ScreenWidth, ScreenHeight),
-		audioPlayer:    audio.NewPlayer(),
-		lastObs:        env.GetObservation(),
+		env:         env,
+		renderer:    screen.NewRenderer(),
+		display:     ebiten.NewImage(ScreenWidth, ScreenHeight),
+		audioPlayer: audio.NewPlayer(),
+		lastObs:     env.GetObservation(),
+		musicStep:   1,
 	}
 	return g
 }
@@ -87,6 +93,26 @@ func (g *Game) logicTick() {
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 
+	// Music speed tuning: -/= adjust notes per frame (audio only, not lives).
+	if g.keyDebounce > 0 {
+		g.keyDebounce--
+	}
+	if g.keyDebounce == 0 {
+		if ebiten.IsKeyPressed(ebiten.KeyMinus) && g.musicStep > 1 {
+			g.musicStep--
+			g.keyDebounce = 8
+			fmt.Printf("Music step: %d notes/frame\n", g.musicStep)
+		}
+		if ebiten.IsKeyPressed(ebiten.KeyEqual) {
+			g.musicStep++
+			g.keyDebounce = 8
+			fmt.Printf("Music step: %d notes/frame\n", g.musicStep)
+		}
+	}
+
+	// Advance the separate music counter.
+	g.musicCounter = (g.musicCounter + g.musicStep) & 255
+
 	// Handle audio based on engine state.
 	g.updateAudio()
 }
@@ -121,7 +147,7 @@ func (g *Game) updateAudio() {
 		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
 		} else if g.env.MusicEnabled {
-			noteIdx := (g.env.MusicNoteIndex & 126) >> 1
+			noteIdx := (g.musicCounter & 126) >> 1
 			freq := data.InGameTuneData[noteIdx]
 			g.audioPlayer.PlayInGameNote(freq)
 		} else {
