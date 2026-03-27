@@ -8,4 +8,5 @@ type Action struct {
 	Left  bool
 	Right bool
 	Jump  bool
+	Enter bool // Start game / fire button.
 }

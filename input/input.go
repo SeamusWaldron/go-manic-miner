@@ -8,7 +8,12 @@ import (
 
 // ToAction converts the keyboard state to an engine Action (pure, no Ebitengine dependency).
 func (s State) ToAction() action.Action {
-	return action.Action{Left: s.Left, Right: s.Right, Jump: s.Jump}
+	return action.Action{
+		Left:  s.Left,
+		Right: s.Right,
+		Jump:  s.Jump,
+		Enter: ebiten.IsKeyPressed(ebiten.KeyEnter),
+	}
 }
 
 // State holds the current input state for one frame.

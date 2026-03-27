@@ -217,8 +217,8 @@ func (e *GameEnv) GetObservation() Observation {
 func (e *GameEnv) stepTitle(act action.Action) {
 	e.TitleFrame++
 
-	// Any input starts the game.
-	if act.Left || act.Right || act.Jump {
+	// Enter/fire starts the game (passed via act.Enter).
+	if act.Enter {
 		e.startGame()
 		return
 	}

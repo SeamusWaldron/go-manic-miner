@@ -94,8 +94,8 @@ func TestTitleToPlaying(t *testing.T) {
 		t.Fatal("expected title state")
 	}
 
-	// Press jump to start game.
-	env.Step(action.Action{Jump: true})
+	// Press Enter to start game.
+	env.Step(action.Action{Enter: true})
 
 	if env.State != StatePlaying {
 		t.Fatalf("expected playing state after input, got %d", env.State)
