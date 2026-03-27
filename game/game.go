@@ -181,17 +181,27 @@ func (g *Game) drawGameOver() {
 }
 
 func (g *Game) renderHUD() {
-	// Row 16 (y=128): Cavern name — yellow text on black.
-	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, 0x06) // INK 6 (yellow).
+	// All positions decoded from the original display file addresses:
+	// $5000 = charRow 16, y=128: Cavern name
+	// $5020 = charRow 17, y=136: "AIR" text
+	// $5224 = charRow 17, pixRow 2, col 4, y=138: Air bar (4 pixel rows)
+	// $5060 = charRow 19, y=152: "High Score ... Score ..."
+	// $50A0 = charRow 21, y=168: Lives
 
-	// Row 17 (y=136): AIR bar with yellow background.
+	// Cavern name — yellow text on black.
+	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, 0x06)
+
+	// "AIR" text at (17,0) — white on red.
+	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17)
+
+	// Air bar at (17, pixRow 2, col 4) — y=138, 4 pixel rows high.
 	g.drawAirBar()
 
-	// Row 19 (y=152): High score and score — yellow text on black.
+	// "High Score ... Score ..." at (19,0) — yellow on black.
 	highScoreText := "High Score " + string(g.env.HighScore[:]) + "   Score " + string(g.lastObs.Score[:])
-	screen.PrintMessage(g.display, 0, 152, highScoreText, 0x06) // INK 6 (yellow).
+	screen.PrintMessage(g.display, 0, 152, highScoreText, 0x06)
 
-	// Row 20-21 (y=160-175): Lives display.
+	// Lives at (21,0) — y=168.
 	g.drawLives()
 }
 
@@ -201,59 +211,67 @@ func (g *Game) drawAirBar() {
 		airLength = 0
 	}
 
-	red := color.RGBA{215, 0, 0, 255}
-	green := color.RGBA{0, 215, 0, 255}
-	startX := 4 * 8 // Column 4 (after "AIR ").
+	// The original draws the air bar at display address $52xx-$55xx:
+	// MSB $52 = charRow 17, pixel row 2 → screen y=138
+	// MSB $53 = pixel row 3 → y=139
+	// MSB $54 = pixel row 4 → y=140
+	// MSB $55 = pixel row 5 → y=141
+	// Starting at column $24 & $1F = 4, spanning airLength cells.
+	// Pixels are $FF (white), with green/red background from attributes.
+
+	startX := 4 * 8 // Column 4 = pixel x=32.
+	barY := 138      // Pixel row 2 of char row 17.
 	barWidthCells := 28
 
-	// Step 1: Fill entire row background — red (PAPER) for depleted, green (PAPER) for remaining.
-	// The original uses attributes where PAPER shows through empty pixels.
-	for row := 0; row < 8; row++ {
-		for cell := 0; cell < barWidthCells; cell++ {
-			var bg color.RGBA
-			if cell < airLength {
-				bg = green
-			} else {
-				bg = red
-			}
-			for bit := 0; bit < 8; bit++ {
-				x := startX + cell*8 + bit
-				y := 136 + row
-				if x < ScreenWidth {
-					g.display.Set(x, y, bg)
-				}
-			}
-		}
-	}
-
-	// Step 2: Draw white $FF pixel bars over the green (remaining) cells.
-	// Original draws 4 pixel rows of $FF. The white pixels represent the
-	// actual air gauge on top of the green background.
+	green := color.RGBA{0, 215, 0, 255}
+	red := color.RGBA{215, 0, 0, 255}
 	white := color.RGBA{215, 215, 215, 255}
+
+	// Draw 4 pixel rows of the bar.
 	for row := 0; row < 4; row++ {
-		for cell := 0; cell < airLength && cell < barWidthCells; cell++ {
+		for cell := 0; cell < barWidthCells; cell++ {
 			for bit := 0; bit < 8; bit++ {
 				x := startX + cell*8 + bit
-				y := 136 + row
-				if x < ScreenWidth {
+				y := barY + row
+				if x >= ScreenWidth {
+					continue
+				}
+				if cell < airLength {
+					// Remaining air: white fill ($FF pixels, INK colour).
 					g.display.Set(x, y, white)
+				} else {
+					// Depleted: red background (PAPER colour, $00 pixels).
+					g.display.Set(x, y, red)
 				}
 			}
 		}
 	}
 
-	// Step 3: "AIR" label area (columns 0-3) — red background with white text.
-	for y := 136; y < 144; y++ {
-		for x := 0; x < startX; x++ {
-			g.display.Set(x, y, red)
+	// Fill the background areas above and below the bar within the char row
+	// (pixel rows 0-1 and 6-7 of char row 17) with green for remaining, red for depleted.
+	for _, rowSet := range [][2]int{{136, 138}, {142, 144}} {
+		for y := rowSet[0]; y < rowSet[1]; y++ {
+			for cell := 0; cell < barWidthCells; cell++ {
+				var c color.RGBA
+				if cell < airLength {
+					c = green
+				} else {
+					c = red
+				}
+				for bit := 0; bit < 8; bit++ {
+					x := startX + cell*8 + bit
+					if x < ScreenWidth {
+						g.display.Set(x, y, c)
+					}
+				}
+			}
 		}
 	}
-	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17) // INK 7 (white), PAPER 2 (red).
 }
 
 func (g *Game) drawLives() {
-	// Clear the lives area (y=160-175) every frame.
-	for y := 160; y < 176; y++ {
+	// Clear the lives area (y=168-183) every frame.
+	for y := 168; y < 184; y++ {
 		for x := 0; x < ScreenWidth; x++ {
 			g.display.Set(x, y, color.Black)
 		}
@@ -282,7 +300,7 @@ func (g *Game) drawLives() {
 			for bit := 7; bit >= 0; bit-- {
 				if leftByte&(1<<uint(bit)) != 0 {
 					x := px + (7 - bit)
-					y := 160 + row
+					y := 168 + row
 					if x < ScreenWidth && y < ScreenHeight {
 						g.display.Set(x, y, cyan)
 					}
@@ -291,7 +309,7 @@ func (g *Game) drawLives() {
 			for bit := 7; bit >= 0; bit-- {
 				if rightByte&(1<<uint(bit)) != 0 {
 					x := px + 8 + (7 - bit)
-					y := 160 + row
+					y := 168 + row
 					if x < ScreenWidth && y < ScreenHeight {
 						g.display.Set(x, y, cyan)
 					}
