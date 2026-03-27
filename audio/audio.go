@@ -57,15 +57,17 @@ func (p *Player) IsTunePlaying() bool {
 }
 
 // PlayInGameNote plays a single in-game music note as a short burst.
-// PlayInGameNote sustains a tone until the next call changes it.
-// The game loop updates the frequency each frame, creating a continuous melody.
+// PlayInGameNote plays a note that sustains for ~50ms then silences.
+// This gives the characteristic beeper staccato while keeping pitch audible.
 func (p *Player) PlayInGameNote(freq byte) {
 	if freq == 0 {
 		p.stream.setTone(0, 0)
 		return
 	}
 	hz := spectrumClock / (float64(freq) * 80.0)
-	p.stream.setTone(hz, 0)
+	// Sustain for ~50ms (60% of an 83ms frame at 12 FPS).
+	dur := float64(sampleRate) * 0.050
+	p.stream.playBurst(hz, int(dur))
 }
 
 // Silence stops all audio output.

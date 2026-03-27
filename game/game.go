@@ -203,42 +203,52 @@ func (g *Game) drawAirBar() {
 
 	red := color.RGBA{215, 0, 0, 255}
 	green := color.RGBA{0, 215, 0, 255}
+	startX := 4 * 8 // Column 4 (after "AIR ").
+	barWidthCells := 28
 
-	// The entire AIR row uses attribute-style rendering:
-	// Filled cells (pixels=$FF) show INK colour = green.
-	// Empty cells (pixels=$00) show PAPER colour = red.
-	// This matches the Spectrum's attribute system for the air bar.
-
-	// First, fill the "AIR" text area (columns 0-3) with red background.
-	for y := 136; y < 144; y++ {
-		for x := 0; x < 4*8; x++ {
-			g.display.Set(x, y, red)
-		}
-	}
-	// Draw "AIR" text in white on red background.
-	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17) // INK 7 (white), PAPER 2 (red).
-
-	// Draw the bar area (columns 4-31).
-	startX := 4 * 8
-	barWidthCells := 28 // Columns 4 through 31.
-
+	// Step 1: Fill entire row background — red (PAPER) for depleted, green (PAPER) for remaining.
+	// The original uses attributes where PAPER shows through empty pixels.
 	for row := 0; row < 8; row++ {
 		for cell := 0; cell < barWidthCells; cell++ {
-			var c color.RGBA
+			var bg color.RGBA
 			if cell < airLength {
-				c = green // Remaining air (INK on filled pixels).
+				bg = green
 			} else {
-				c = red // Depleted air (PAPER on empty pixels).
+				bg = red
 			}
 			for bit := 0; bit < 8; bit++ {
 				x := startX + cell*8 + bit
 				y := 136 + row
 				if x < ScreenWidth {
-					g.display.Set(x, y, c)
+					g.display.Set(x, y, bg)
 				}
 			}
 		}
 	}
+
+	// Step 2: Draw white $FF pixel bars over the green (remaining) cells.
+	// Original draws 4 pixel rows of $FF. The white pixels represent the
+	// actual air gauge on top of the green background.
+	white := color.RGBA{215, 215, 215, 255}
+	for row := 0; row < 4; row++ {
+		for cell := 0; cell < airLength && cell < barWidthCells; cell++ {
+			for bit := 0; bit < 8; bit++ {
+				x := startX + cell*8 + bit
+				y := 136 + row
+				if x < ScreenWidth {
+					g.display.Set(x, y, white)
+				}
+			}
+		}
+	}
+
+	// Step 3: "AIR" label area (columns 0-3) — red background with white text.
+	for y := 136; y < 144; y++ {
+		for x := 0; x < startX; x++ {
+			g.display.Set(x, y, red)
+		}
+	}
+	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17) // INK 7 (white), PAPER 2 (red).
 }
 
 func (g *Game) drawLives() {
