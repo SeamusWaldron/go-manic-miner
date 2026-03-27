@@ -208,7 +208,7 @@ func (g *Game) renderHUD() {
 }
 
 func (g *Game) drawAirBar() {
-	airLength := g.lastObs.Air - 0x24 // Current bar length in cells.
+	airLength := g.lastObs.Air - 0x24
 	if airLength < 0 {
 		airLength = 0
 	}
@@ -217,34 +217,35 @@ func (g *Game) drawAirBar() {
 	red := color.RGBA{215, 0, 0, 255}
 	white := color.RGBA{215, 215, 215, 255}
 
-	// The red/green split moves with the air level:
-	// LEFT of current air position = RED (depleted)
-	// RIGHT of current air position = GREEN (remaining)
-	// White bar drawn on top of the green.
-
-	// Air bar starts at column 4. airLength cells of green, rest is red.
-	// splitCol = 4 + airLength (the column where green ends and red begins).
-	splitX := (4 + airLength) * 8
-
-	// Step 1: Fill entire AIR row background.
+	// FIXED background — set once, never changes:
+	// Cols 0-3: red (AIR label area)
+	// Cols 4-30: green (initial air extent, 27 cells)
+	// Col 31: red (beyond initial air)
 	for y := 136; y < 144; y++ {
-		for x := 0; x < ScreenWidth; x++ {
-			if x < splitX {
-				g.display.Set(x, y, red)
+		for col := 0; col < 32; col++ {
+			var c color.RGBA
+			if col >= 4 && col <= 30 {
+				c = green
 			} else {
-				g.display.Set(x, y, green)
+				c = red
+			}
+			for bit := 0; bit < 8; bit++ {
+				g.display.Set(col*8+bit, y, c)
 			}
 		}
 	}
 
-	// Step 2: Draw white bar on the GREEN portion (4 pixel rows, y=138-141).
+	// White gauge on top — shrinks from right as air depletes.
+	// 4 pixel rows at y=138-141 (pixel rows 2-5 of char row 17).
 	for row := 0; row < 4; row++ {
-		for x := splitX; x < ScreenWidth; x++ {
-			g.display.Set(x, 138+row, white)
+		for cell := 0; cell < airLength; cell++ {
+			for bit := 0; bit < 8; bit++ {
+				g.display.Set((cell+4)*8+bit, 138+row, white)
+			}
 		}
 	}
 
-	// Step 3: "AIR" text on top of the red.
+	// "AIR" text on the red.
 	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17)
 }
 
