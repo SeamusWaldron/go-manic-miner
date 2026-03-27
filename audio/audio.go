@@ -47,14 +47,16 @@ func (p *Player) PlayNote(freq1, freq2 byte) {
 	}
 
 	// Convert Spectrum delay counter to Hz.
-	// The beeper toggles every (counter * 4) T-states.
-	// Full cycle = counter * 8 T-states. Freq = clock / (counter * 8).
+	// The title tune loop body takes ~56 T-states per iteration.
+	// The counter determines the half-period: half_period = counter * 56 T-states.
+	// Full period = counter * 112 T-states.
+	// Frequency = 3500000 / (counter * 112).
 	var hz1, hz2 float64
 	if freq1 > 0 {
-		hz1 = spectrumClock / (float64(freq1) * 8.0)
+		hz1 = spectrumClock / (float64(freq1) * 112.0)
 	}
 	if freq2 > 0 {
-		hz2 = spectrumClock / (float64(freq2) * 8.0)
+		hz2 = spectrumClock / (float64(freq2) * 112.0)
 	}
 
 	p.stream.setFrequencies(hz1, hz2)
@@ -66,7 +68,9 @@ func (p *Player) PlayInGameNote(freq byte) {
 		p.stream.setFrequencies(0, 0)
 		return
 	}
-	hz := spectrumClock / (float64(freq) * 8.0)
+	// In-game loop is ~40 T-states per iteration.
+	// Frequency = 3500000 / (counter * 80).
+	hz := spectrumClock / (float64(freq) * 80.0)
 	p.stream.setFrequencies(hz, 0)
 }
 
