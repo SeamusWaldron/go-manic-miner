@@ -6,12 +6,27 @@ package engine
 import (
 	"manicminer/action"
 	"manicminer/cavern"
+	"manicminer/data"
 	"manicminer/entity"
 	"manicminer/screen"
 )
 
+// State represents the overall game state.
+type State int
+
+const (
+	StateTitle    State = iota // Title screen with scrolling banner.
+	StatePlaying               // Active gameplay.
+	StateDying                 // Death animation in progress.
+	StateGameOver              // Game over sequence.
+	StateDemo                  // Demo mode (auto-cycling caverns).
+	StateNextCavern            // Cavern transition animation.
+)
+
 // GameEnv is the headless game environment.
 type GameEnv struct {
+	State State
+
 	CurrentCavern *cavern.Cavern
 	CavernNumber  int
 
@@ -26,13 +41,13 @@ type GameEnv struct {
 	Items          []entity.Item
 	Portal         *entity.Portal
 
-	// Special entities (cavern-specific).
+	// Special entities.
 	Eugene  *entity.Eugene
 	Kong    *entity.Kong
 	Skylabs []entity.Skylab
 
-	Score        [10]byte // ASCII digits. [4]-[9] are the visible 6.
-	HighScore    [6]byte  // ASCII digits.
+	Score        [10]byte
+	HighScore    [6]byte
 	Lives        int
 	Air          byte
 	GameClock    byte
@@ -40,26 +55,64 @@ type GameEnv struct {
 	FlashCounter byte
 	LastItemAttr byte
 
-	// Internal tracking for reward computation.
+	// Title screen state.
+	BannerOffset int // Scroll position for title banner.
+	TitleFrame   int // Frame counter for title screen.
+
+	// Death/transition animation state.
+	AnimCounter int
+
+	// Music state.
+	MusicNoteIndex int
+	MusicEnabled   bool
+
+	// Demo mode.
+	DemoCounter int
+
+	// Internal tracking.
 	prevScoreInt int
 	levelDone    bool
 	died         bool
 }
 
-// NewGameEnv creates a new game environment starting at cavern 0 with 3 lives.
+// NewGameEnv creates a new game environment.
 func NewGameEnv() *GameEnv {
-	e := &GameEnv{Lives: 2}
+	e := &GameEnv{
+		State:        StateTitle,
+		Lives:        2,
+		MusicEnabled: true,
+	}
 	for i := range e.Score {
 		e.Score[i] = '0'
 	}
 	for i := range e.HighScore {
 		e.HighScore[i] = '0'
 	}
-	e.Reset(0)
+	e.initTitle()
 	return e
 }
 
-// Reset initialises (or re-initialises) a cavern. Returns the initial observation.
+// initTitle sets up the title screen state.
+func (e *GameEnv) initTitle() {
+	e.State = StateTitle
+	e.BannerOffset = 0
+	e.TitleFrame = 0
+	e.CavernNumber = 0
+	e.MusicNoteIndex = 0
+
+	// Build title screen buffers.
+	// Top two-thirds: title screen graphic data.
+	copy(e.WorkPixels[:], data.TitleScreenPixels[:])
+
+	// Attributes: top third from The Final Barrier cavern data, bottom two-thirds from BottomAttributes.
+	finalBarrier := cavern.Load(19)
+	if finalBarrier != nil {
+		copy(e.WorkAttr[0:256], finalBarrier.Attributes[0:256])
+	}
+	copy(e.WorkAttr[256:], data.TitleScreenBottomAttrs[:])
+}
+
+// Reset initialises a cavern for gameplay. Returns the initial observation.
 func (e *GameEnv) Reset(cavernNum int) Observation {
 	e.CavernNumber = cavernNum
 	e.CurrentCavern = cavern.Load(cavernNum)
@@ -82,8 +135,9 @@ func (e *GameEnv) Reset(cavernNum int) Observation {
 	e.LastItemAttr = 0xFF
 	e.levelDone = false
 	e.died = false
+	e.MusicNoteIndex = 0
 
-	// Initialise special entities based on cavern number.
+	// Special entities.
 	e.Eugene = nil
 	e.Kong = nil
 	e.Skylabs = nil
@@ -97,17 +151,30 @@ func (e *GameEnv) Reset(cavernNum int) Observation {
 		e.Skylabs = entity.NewSkylabs(e.CurrentCavern)
 	}
 
+	e.State = StatePlaying
 	return e.buildObservation()
 }
 
-// Step advances the game by one logic frame with the given action.
-// Returns the resulting observation, reward, and done flag.
+// Step advances the game by one logic frame.
 func (e *GameEnv) Step(act action.Action) StepResult {
 	e.prevScoreInt = e.scoreToInt()
 	e.levelDone = false
 	e.died = false
 
-	e.step(act)
+	switch e.State {
+	case StateTitle:
+		e.stepTitle(act)
+	case StatePlaying:
+		e.stepPlaying(act)
+	case StateDying:
+		e.stepDying()
+	case StateGameOver:
+		e.stepGameOver()
+	case StateNextCavern:
+		e.stepNextCavern()
+	case StateDemo:
+		e.stepDemo()
+	}
 
 	obs := e.buildObservation()
 	reward := e.computeReward()
@@ -117,11 +184,7 @@ func (e *GameEnv) Step(act action.Action) StepResult {
 	obs.LevelDone = e.levelDone
 	obs.GameOver = e.Lives < 0
 
-	return StepResult{
-		Obs:    obs,
-		Reward: reward,
-		Done:   done,
-	}
+	return StepResult{Obs: obs, Reward: reward, Done: done}
 }
 
 // GetObservation returns the current state without advancing.
@@ -129,8 +192,41 @@ func (e *GameEnv) GetObservation() Observation {
 	return e.buildObservation()
 }
 
-// step runs one logic frame — this is the extracted logicUpdate().
-func (e *GameEnv) step(act action.Action) {
+// stepTitle handles one frame of the title screen.
+func (e *GameEnv) stepTitle(act action.Action) {
+	e.TitleFrame++
+
+	// Any input starts the game.
+	if act.Left || act.Right || act.Jump {
+		e.startGame()
+		return
+	}
+
+	// Scroll the banner.
+	if e.TitleFrame%8 == 0 {
+		e.BannerOffset++
+		if e.BannerOffset >= 224 {
+			// Banner finished scrolling — enter demo mode.
+			e.State = StateDemo
+			e.DemoCounter = 64
+			e.Reset(e.CavernNumber)
+			e.State = StateDemo
+			return
+		}
+	}
+}
+
+func (e *GameEnv) startGame() {
+	e.Lives = 2
+	for i := range e.Score {
+		e.Score[i] = '0'
+	}
+	e.CavernNumber = 0
+	e.Reset(0)
+}
+
+// stepPlaying handles one frame of active gameplay.
+func (e *GameEnv) stepPlaying(act action.Action) {
 	if e.CurrentCavern == nil || e.Willy == nil {
 		return
 	}
@@ -145,11 +241,11 @@ func (e *GameEnv) step(act action.Action) {
 	// Update Willy.
 	e.Willy.Update(act, e.CurrentCavern, e.EmptyAttr[:], e.EmptyPixels[:], e.EmptyAttr[:])
 
-	// Re-copy empty buffers (crumbling may have modified them).
+	// Re-copy after crumbling.
 	copy(e.WorkAttr[:], e.EmptyAttr[:])
 	copy(e.WorkPixels[:], e.EmptyPixels[:])
 
-	// Check nasties, set Willy's attributes, draw Willy (before guardians for collision).
+	// Check nasties, set attributes, draw Willy.
 	if e.Willy.Alive {
 		e.Willy.CheckNasties(e.CurrentCavern, e.WorkAttr[:])
 	}
@@ -158,7 +254,7 @@ func (e *GameEnv) step(act action.Action) {
 		e.Willy.Draw(e.WorkPixels[:])
 	}
 
-	// Draw horizontal guardians (blend mode detects collision with Willy's pixels).
+	// Draw horizontal guardians.
 	if e.Willy.Alive {
 		if entity.DrawHorizGuardians(e.HorizGuardians, e.CurrentCavern, e.CavernNumber,
 			e.WorkAttr[:], e.WorkPixels[:]) {
@@ -166,7 +262,7 @@ func (e *GameEnv) step(act action.Action) {
 		}
 	}
 
-	// Move conveyor animation.
+	// Move conveyor.
 	e.moveConveyor()
 
 	// Draw and collect items.
@@ -181,17 +277,15 @@ func (e *GameEnv) step(act action.Action) {
 		}
 	}
 
-	// Special entity: Skylabs (cavern 13) — replaces vertical guardians.
-	if e.Skylabs != nil {
-		if e.Willy.Alive {
-			if entity.MoveAndDrawSkylabs(e.Skylabs, e.CurrentCavern,
-				e.WorkAttr[:], e.WorkPixels[:]) {
-				e.Willy.Kill()
-			}
+	// Special entity: Skylabs (cavern 13).
+	if e.Skylabs != nil && e.Willy.Alive {
+		if entity.MoveAndDrawSkylabs(e.Skylabs, e.CurrentCavern,
+			e.WorkAttr[:], e.WorkPixels[:]) {
+			e.Willy.Kill()
 		}
 	}
 
-	// Move and draw vertical guardians (caverns >= 8, except 13 = Skylabs).
+	// Vertical guardians (caverns >= 8, except 13).
 	if e.CavernNumber >= 8 && e.CavernNumber != 13 {
 		entity.MoveVertGuardians(e.VertGuardians)
 		if e.Willy.Alive {
@@ -202,7 +296,7 @@ func (e *GameEnv) step(act action.Action) {
 		}
 	}
 
-	// Special entity: Kong Beast (caverns 7, 11).
+	// Kong Beast (caverns 7, 11).
 	if e.Kong != nil && e.Willy.Alive {
 		if e.Kong.MoveAndDraw(e.CurrentCavern, e.GameClock,
 			e.WorkAttr[:], e.WorkPixels[:], e.Score[:]) {
@@ -210,7 +304,7 @@ func (e *GameEnv) step(act action.Action) {
 		}
 	}
 
-	// Special entity: Light Beam (cavern 18).
+	// Light Beam (cavern 18).
 	if e.CavernNumber == 18 && e.Willy.Alive {
 		extraDrain := entity.DrawLightBeam(e.CurrentCavern, e.WorkAttr[:])
 		for i := 0; i < extraDrain; i++ {
@@ -218,12 +312,10 @@ func (e *GameEnv) step(act action.Action) {
 		}
 	}
 
-	// Activate portal flash when all items collected.
+	// Portal.
 	if e.LastItemAttr == 0 && e.Portal != nil {
 		e.Portal.ActivateFlash()
 	}
-
-	// Draw portal and check entry.
 	if e.Portal != nil {
 		if e.Portal.CheckEntry(e.Willy) {
 			e.moveToNextCavern()
@@ -232,7 +324,7 @@ func (e *GameEnv) step(act action.Action) {
 		e.Portal.Draw(e.WorkAttr[:], e.WorkPixels[:])
 	}
 
-	// Handle screen flash.
+	// Screen flash.
 	if e.FlashCounter > 0 {
 		e.FlashCounter--
 		flashAttr := (e.FlashCounter << 3) & 0x38
@@ -241,19 +333,96 @@ func (e *GameEnv) step(act action.Action) {
 		}
 	}
 
-	// Decrease air supply.
+	// Decrease air.
 	e.decreaseAir()
 
-	// Check if Willy died.
+	// Advance in-game music note.
+	e.MusicNoteIndex = (e.MusicNoteIndex + 1) & 63
+
+	// Check death.
 	if !e.Willy.Alive {
 		e.died = true
+		e.State = StateDying
+		e.AnimCounter = 0
+	}
+}
+
+// stepDying handles the death animation (colour cycling).
+func (e *GameEnv) stepDying() {
+	e.AnimCounter++
+
+	// Flash the screen with cycling colours for ~8 frames.
+	attr := byte(0x47 - (e.AnimCounter % 8))
+	for i := range e.WorkAttr {
+		e.WorkAttr[i] = attr
+	}
+
+	if e.AnimCounter >= 32 {
 		if e.Lives > 0 {
 			e.Lives--
 			e.Reset(e.CavernNumber)
 		} else {
-			e.handleGameOver()
+			e.State = StateGameOver
+			e.AnimCounter = 0
 		}
 	}
+}
+
+// stepGameOver handles the game over sequence.
+func (e *GameEnv) stepGameOver() {
+	e.AnimCounter++
+
+	// Update high score.
+	currentScore := string(e.Score[4:])
+	highScore := string(e.HighScore[:])
+	if currentScore > highScore {
+		copy(e.HighScore[:], e.Score[4:])
+	}
+
+	if e.AnimCounter >= 96 {
+		// Return to title screen.
+		e.initTitle()
+	}
+}
+
+// stepNextCavern handles the cavern transition animation.
+func (e *GameEnv) stepNextCavern() {
+	e.AnimCounter++
+
+	// Colour cycling transition.
+	attr := byte(0x3F - (e.AnimCounter % 64))
+	for i := range e.WorkAttr {
+		e.WorkAttr[i] = attr
+	}
+
+	if e.AnimCounter >= 64 {
+		next := e.CavernNumber + 1
+		if next >= NumCaverns {
+			next = 0
+		}
+		e.Reset(next)
+	}
+}
+
+// stepDemo handles demo mode (auto-cycling caverns with no player control).
+func (e *GameEnv) stepDemo() {
+	if e.CurrentCavern == nil || e.Willy == nil {
+		return
+	}
+
+	e.DemoCounter--
+	if e.DemoCounter <= 0 {
+		// Move to next cavern in demo.
+		next := (e.CavernNumber + 1) % NumCaverns
+		e.Reset(next)
+		e.State = StateDemo
+		e.DemoCounter = 64
+		return
+	}
+
+	// Run the game logic but with no input (Willy stands still).
+	e.stepPlaying(action.Action{})
+	e.State = StateDemo // Ensure we stay in demo state.
 }
 
 func (e *GameEnv) moveConveyor() {
@@ -271,7 +440,6 @@ func (e *GameEnv) moveConveyor() {
 			}
 			row0Idx := cellRow*256 + 0*32 + cellCol
 			row2Idx := cellRow*256 + 2*32 + cellCol
-
 			if dir == 0 {
 				e.EmptyPixels[row0Idx] = rotateLeft(e.EmptyPixels[row0Idx], 2)
 				e.EmptyPixels[row2Idx] = rotateRight(e.EmptyPixels[row2Idx], 2)
@@ -300,30 +468,14 @@ func (e *GameEnv) decreaseAir() {
 }
 
 func (e *GameEnv) moveToNextCavern() {
+	// Convert remaining air to score.
 	for e.Air > 0x24 {
 		e.Air--
 		entity.AddToScore(e.Score[:], 9, 1)
 	}
-
-	next := e.CavernNumber + 1
-	if next >= NumCaverns {
-		next = 0
-	}
 	e.levelDone = true
-	e.Reset(next)
-}
-
-func (e *GameEnv) handleGameOver() {
-	currentScore := string(e.Score[4:])
-	highScore := string(e.HighScore[:])
-	if currentScore > highScore {
-		copy(e.HighScore[:], e.Score[4:])
-	}
-	e.Lives = 2
-	for i := range e.Score {
-		e.Score[i] = '0'
-	}
-	e.Reset(0)
+	e.State = StateNextCavern
+	e.AnimCounter = 0
 }
 
 func (e *GameEnv) buildObservation() Observation {
@@ -356,14 +508,14 @@ func (e *GameEnv) buildObservation() Observation {
 }
 
 func (e *GameEnv) computeReward() float64 {
-	reward := float64(e.scoreToInt()-e.prevScoreInt) * 0.01 // Score delta.
+	reward := float64(e.scoreToInt()-e.prevScoreInt) * 0.01
 	if e.levelDone {
-		reward += 10.0 // Level completion bonus.
+		reward += 10.0
 	}
 	if e.died {
-		reward -= 1.0 // Death penalty.
+		reward -= 1.0
 	}
-	reward -= 0.001 // Small time penalty to encourage speed.
+	reward -= 0.001
 	return reward
 }
 

@@ -5,6 +5,7 @@ package game
 import (
 	"image/color"
 
+	"manicminer/data"
 	"manicminer/engine"
 	"manicminer/input"
 	"manicminer/screen"
@@ -47,25 +48,27 @@ func (g *Game) Update() error {
 func (g *Game) logicTick() {
 	inp := input.Read()
 
-	// Pause (UI concern — not sent to engine).
-	if inp.Pause && !g.paused {
-		g.paused = true
-		return
-	}
-	if g.paused {
-		if inp.Left || inp.Right || inp.Jump || inp.MusicToggle {
-			g.paused = false
+	// Pause handling (UI-only, not sent to engine).
+	if g.env.State == engine.StatePlaying {
+		if inp.Pause && !g.paused {
+			g.paused = true
+			return
 		}
-		return
+		if g.paused {
+			if inp.Left || inp.Right || inp.Jump || inp.MusicToggle {
+				g.paused = false
+			}
+			return
+		}
+		// Quit: restart cavern.
+		if inp.Quit {
+			g.lastObs = g.env.Reset(g.env.CavernNumber)
+			return
+		}
 	}
 
-	// Quit (UI concern — restart cavern).
-	if inp.Quit {
-		g.lastObs = g.env.Reset(g.env.CavernNumber)
-		return
-	}
-
-	// Convert keyboard state to pure Action and step the engine.
+	// For title screen, any key starts the game (mapped through action).
+	// For other states, just pass the action through.
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 }
@@ -74,17 +77,56 @@ func (g *Game) logicTick() {
 func (g *Game) Draw(scr *ebiten.Image) {
 	scr.Fill(color.Black)
 
-	// Render cavern area from the observation's buffers.
-	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
-
-	// Render HUD (bottom 64 pixels).
-	g.renderHUD()
+	switch g.env.State {
+	case engine.StateTitle:
+		g.drawTitle()
+	case engine.StatePlaying, engine.StateDemo:
+		g.drawPlaying()
+	case engine.StateDying, engine.StateNextCavern:
+		g.drawPlaying() // Show the colour-cycling animation.
+	case engine.StateGameOver:
+		g.drawGameOver()
+	}
 
 	scr.DrawImage(g.display, &ebiten.DrawImageOptions{})
 }
 
+func (g *Game) drawTitle() {
+	// Render the title screen buffers.
+	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
+
+	// Draw the scrolling banner at row 19 (y=152).
+	bannerStart := g.env.BannerOffset
+	var bannerText [32]byte
+	for i := 0; i < 32; i++ {
+		idx := bannerStart + i
+		if idx >= 0 && idx < len(data.TitleScreenBanner) {
+			bannerText[i] = data.TitleScreenBanner[idx]
+		} else {
+			bannerText[i] = ' '
+		}
+	}
+	screen.PrintMessage(g.display, 0, 152, string(bannerText[:]), 0)
+}
+
+func (g *Game) drawPlaying() {
+	// Render cavern area from observation buffers.
+	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
+	g.renderHUD()
+}
+
+func (g *Game) drawGameOver() {
+	// Simple game over display.
+	g.display.Fill(color.Black)
+	screen.PrintMessage(g.display, 10*8, 6*8, "Game", 0)
+	screen.PrintMessage(g.display, 18*8, 6*8, "Over", 0)
+
+	highScoreText := "High Score " + string(g.env.HighScore[:]) + "   Score " + string(g.lastObs.Score[:])
+	screen.PrintMessage(g.display, 0, 152, highScoreText, 0)
+}
+
 func (g *Game) renderHUD() {
-	var hudAttr byte // Black background.
+	var hudAttr byte
 
 	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, hudAttr)
 	screen.PrintMessage(g.display, 0, 136, "AIR", hudAttr)
