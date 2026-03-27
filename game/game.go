@@ -160,11 +160,23 @@ func (g *Game) updateAudio() {
 		if g.env.MusicEnabled && !g.audioPlayer.IsInGameMusicPlaying() {
 			g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
 		}
-		// Jump/fall SFX: temporarily override the music output via burst.
-		// The music keeps advancing internally — no stop/restart.
-		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
+		// Sound effects: temporarily override the music output via burst.
+		switch g.lastObs.SoundRequest {
+		case 1, 2: // Jump / fall.
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
+		case 3: // Item collected — short high blip.
+			g.audioPlayer.PlaySFX(8)
 		}
+
+	case engine.StateDying:
+		// Death sound: descending pitch buzz. Original MainLoop20-21 plays
+		// 8 iterations with D going from 7 to 63 (ascending pitch = descending buzz).
+		g.audioPlayer.StopInGameMusic()
+		pitch := 7 + g.env.AnimCounter*8
+		if pitch > 63 {
+			pitch = 63
+		}
+		g.audioPlayer.PlaySFX(pitch)
 
 	default:
 		g.audioPlayer.Silence()
