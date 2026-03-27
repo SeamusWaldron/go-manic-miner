@@ -90,27 +90,28 @@ func (g *Game) logicTick() {
 	g.updateAudio()
 }
 
-// updateAudio plays the appropriate sound for the current engine state.
+// updateAudio manages sound based on game state.
 func (g *Game) updateAudio() {
 	switch g.env.State {
 	case engine.StateTitle:
 		if g.env.TitlePhase == 0 {
-			// Piano phase: play the current tune note.
-			tuneData := data.TitleTuneData[:]
-			noteOffset := g.env.TuneNoteIndex * 3
-			if noteOffset+2 < len(tuneData) && tuneData[noteOffset] != 0xFF {
-				freq1 := tuneData[noteOffset+1]
-				freq2 := tuneData[noteOffset+2]
-				g.audioPlayer.PlayNote(freq1, freq2)
-			} else {
-				g.audioPlayer.Silence()
+			// Start the title tune if not already playing.
+			if !g.audioPlayer.IsTunePlaying() && g.env.TitleFrame <= 1 {
+				g.audioPlayer.PlayTune(data.TitleTuneData[:])
+			}
+			// Sync the engine's TuneNoteIndex from the audio player
+			// (for piano key animation).
+			g.env.TuneNoteIndex = g.audioPlayer.TuneNoteIndex()
+			// Check if tune finished — advance to banner phase.
+			if !g.audioPlayer.IsTunePlaying() && g.env.TitleFrame > 1 {
+				g.env.TitlePhase = 1
+				g.env.BannerOffset = 0
 			}
 		} else {
 			g.audioPlayer.Silence()
 		}
 
 	case engine.StatePlaying:
-		// In-game music: play current note from Mountain King.
 		if g.env.MusicEnabled {
 			noteIdx := g.env.MusicNoteIndex & 63
 			freq := data.InGameTuneData[noteIdx]

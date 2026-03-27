@@ -231,29 +231,25 @@ func (e *GameEnv) stepTitle(act action.Action) {
 }
 
 // stepTitleTune animates piano keys through the Blue Danube.
+// stepTitleTune animates piano keys based on the currently-playing note.
+// The audio system manages note timing internally — TuneNoteIndex is synced
+// from the audio player by the game wrapper.
 func (e *GameEnv) stepTitleTune() {
 	tuneData := data.TitleTuneData[:]
-
-	// Each note is 3 bytes: duration, freq1, freq2. $FF = end.
-	noteOffset := e.TuneNoteIndex * 3
-	if noteOffset+2 >= len(tuneData) || tuneData[noteOffset] == 0xFF {
-		// Tune finished — switch to banner phase.
-		e.TitlePhase = 1
-		e.BannerOffset = 0
-		// Reset piano keys to normal.
-		copy(e.WorkAttr[:], e.titleBaseAttrs[:])
-		return
-	}
-
-	duration := tuneData[noteOffset]
-	freq1 := tuneData[noteOffset+1]
-	freq2 := tuneData[noteOffset+2]
 
 	// Reset attributes to base (clears previous key highlights).
 	copy(e.WorkAttr[:], e.titleBaseAttrs[:])
 
+	// Get the current note from the audio-synced index.
+	noteOffset := e.TuneNoteIndex * 3
+	if noteOffset+2 >= len(tuneData) || tuneData[noteOffset] == 0xFF {
+		return // Tune finished — wrapper will switch to banner phase.
+	}
+
+	freq1 := tuneData[noteOffset+1]
+	freq2 := tuneData[noteOffset+2]
+
 	// Highlight the two piano keys for this note.
-	// Key index = 31 - ((freq - 8) / 8), mapped to attribute row 15, columns 0-31.
 	if freq1 > 0 {
 		key1 := pianoKeyColumn(freq1)
 		if key1 >= 0 && key1 < 32 {
@@ -265,20 +261,6 @@ func (e *GameEnv) stepTitleTune() {
 		if key2 >= 0 && key2 < 32 {
 			e.WorkAttr[15*32+key2] = 40 // INK 0, PAPER 5.
 		}
-	}
-
-	// Advance to next note based on duration.
-	// Original duration is a loop count; we approximate as frames.
-	// Duration $50=80 ≈ 6 frames, $32=50 ≈ 4 frames, $64=100 ≈ 8 frames.
-	framesPerNote := int(duration) / 13
-	if framesPerNote < 1 {
-		framesPerNote = 1
-	}
-
-	e.TuneFrameCount++
-	if e.TuneFrameCount >= framesPerNote {
-		e.TuneFrameCount = 0
-		e.TuneNoteIndex++
 	}
 }
 
