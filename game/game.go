@@ -112,6 +112,10 @@ func (g *Game) updateAudio() {
 		}
 
 	case engine.StatePlaying:
+		// Stop the title tune if it was still playing.
+		if g.audioPlayer.IsTunePlaying() {
+			g.audioPlayer.Silence()
+		}
 		if g.env.MusicEnabled {
 			noteIdx := g.env.MusicNoteIndex & 63
 			freq := data.InGameTuneData[noteIdx]
