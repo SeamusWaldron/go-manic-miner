@@ -56,7 +56,9 @@ func (p *Player) IsTunePlaying() bool {
 	return p.stream.tunePlaying
 }
 
-// PlayInGameNote plays a single in-game music note.
+// PlayInGameNote plays a single in-game music note as a short burst.
+// In the original, each note plays for B*C iterations (~768 * 40 T-states = 8.8ms)
+// then silence for the rest of the frame. This gives the staccato beeper sound.
 func (p *Player) PlayInGameNote(freq byte) {
 	if freq == 0 {
 		p.stream.setTone(0, 0)
@@ -64,7 +66,10 @@ func (p *Player) PlayInGameNote(freq byte) {
 	}
 	// In-game loop: ~40 T-states per iteration.
 	hz := spectrumClock / (float64(freq) * 80.0)
-	p.stream.setTone(hz, 0)
+	// Note duration: 768 iterations * 40 T-states / 3500000 = ~8.8ms.
+	noteDuration := float64(sampleRate) * 0.0088 // ~388 samples at 44100 Hz.
+	durationSamples := int(noteDuration)
+	p.stream.playBurst(hz, durationSamples)
 }
 
 // Silence stops all audio output.
@@ -88,6 +93,9 @@ type toneStream struct {
 	tuneData        []byte
 	tuneNoteIdx     int
 	tuneSamplesLeft int // Samples remaining for current note.
+
+	// Burst mode: play a tone for a fixed number of samples, then silence.
+	burstSamplesLeft int
 }
 
 func newToneStream() *toneStream {
@@ -98,6 +106,15 @@ func (s *toneStream) setTone(f1, f2 float64) {
 	s.mu.Lock()
 	s.freq1 = f1
 	s.freq2 = f2
+	s.burstSamplesLeft = -1 // Continuous mode.
+	s.mu.Unlock()
+}
+
+func (s *toneStream) playBurst(hz float64, samples int) {
+	s.mu.Lock()
+	s.freq1 = hz
+	s.freq2 = 0
+	s.burstSamplesLeft = samples
 	s.mu.Unlock()
 }
 
@@ -160,6 +177,7 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 	f1 := s.freq1
 	f2 := s.freq2
 	playing := s.tunePlaying
+	burst := s.burstSamplesLeft
 	s.mu.Unlock()
 
 	for i := 0; i < numSamples; i++ {
@@ -175,6 +193,15 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 				playing = s.tunePlaying
 			}
 			s.mu.Unlock()
+		}
+
+		// Burst mode: count down and silence when expired.
+		if burst >= 0 {
+			burst--
+			if burst <= 0 {
+				f1 = 0
+				f2 = 0
+			}
 		}
 
 		var sample float32

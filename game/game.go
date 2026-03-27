@@ -182,11 +182,19 @@ func (g *Game) drawGameOver() {
 
 func (g *Game) renderHUD() {
 	var hudAttr byte
+	// Row 16 (y=128): Cavern name.
 	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, hudAttr)
+
+	// Row 17 (y=136): "AIR" + air bar.
 	screen.PrintMessage(g.display, 0, 136, "AIR", hudAttr)
 	g.drawAirBar()
+
+	// Row 19 (y=152): High score and score.
 	highScoreText := "High Score " + string(g.env.HighScore[:]) + "   Score " + string(g.lastObs.Score[:])
 	screen.PrintMessage(g.display, 0, 152, highScoreText, hudAttr)
+
+	// Row 20-21 (y=160-175): Lives display (small Willy sprites).
+	g.drawLives()
 }
 
 func (g *Game) drawAirBar() {
@@ -194,15 +202,67 @@ func (g *Game) drawAirBar() {
 	if airLength < 0 {
 		airLength = 0
 	}
-	startX := 4 * 8
+
+	// The air bar spans from column 4 (after "AIR ") to column 31.
+	// Total bar width = 27 cells. Remaining air fills from left, depleted area is red.
+	startX := 4 * 8 // Pixel x = 32.
+	barWidthCells := 27
+
+	red := color.RGBA{215, 0, 0, 255}
 	green := color.RGBA{0, 215, 0, 255}
+
 	for row := 0; row < 4; row++ {
-		for cell := 0; cell < airLength; cell++ {
+		for cell := 0; cell < barWidthCells; cell++ {
+			var c color.RGBA
+			if cell < airLength {
+				c = green // Remaining air.
+			} else {
+				c = red // Depleted air.
+			}
 			for bit := 0; bit < 8; bit++ {
 				x := startX + cell*8 + bit
 				y := 136 + row
 				if x < ScreenWidth {
-					g.display.Set(x, y, green)
+					g.display.Set(x, y, c)
+				}
+			}
+		}
+	}
+}
+
+func (g *Game) drawLives() {
+	lives := g.env.Lives
+	if lives <= 0 {
+		return
+	}
+	// Draw small Willy sprites at the bottom of the screen.
+	// In the original, lives are drawn at row 20 (y=160), 2 cells apart.
+	// We use the current music note index to pick the animation frame.
+	animIdx := (g.env.MusicNoteIndex >> 2) & 3
+	spriteData := data.WillySprites[animIdx]
+
+	for i := 0; i < lives && i < 8; i++ {
+		px := i * 16 // Each Willy is 16 pixels wide.
+		// Draw directly to the display image.
+		for row := 0; row < 16; row++ {
+			leftByte := spriteData[row*2]
+			rightByte := spriteData[row*2+1]
+			for bit := 7; bit >= 0; bit-- {
+				if leftByte&(1<<uint(bit)) != 0 {
+					x := px + (7 - bit)
+					y := 160 + row
+					if x < ScreenWidth && y < ScreenHeight {
+						g.display.Set(x, y, color.RGBA{215, 215, 0, 255}) // Yellow.
+					}
+				}
+			}
+			for bit := 7; bit >= 0; bit-- {
+				if rightByte&(1<<uint(bit)) != 0 {
+					x := px + 8 + (7 - bit)
+					y := 160 + row
+					if x < ScreenWidth && y < ScreenHeight {
+						g.display.Set(x, y, color.RGBA{215, 215, 0, 255})
+					}
 				}
 			}
 		}
