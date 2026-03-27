@@ -450,10 +450,33 @@ func (e *GameEnv) stepDying() {
 			e.Lives--
 			e.Reset(e.CavernNumber)
 		} else {
-			e.State = StateGameOver
-			e.AnimCounter = 0
+			e.initGameOver()
 		}
 	}
+}
+
+// initGameOver sets up the game over sequence state.
+func (e *GameEnv) initGameOver() {
+	// Update high score.
+	currentScore := string(e.Score[4:])
+	highScore := string(e.HighScore[:])
+	if currentScore > highScore {
+		copy(e.HighScore[:], e.Score[4:])
+	}
+
+	// Clear the pixel buffer and draw Willy + plinth.
+	for i := range e.WorkPixels {
+		e.WorkPixels[i] = 0
+	}
+	willySprite := data.WillySprites[2]
+	screen.DrawSprite(e.WorkPixels[:], 96, 15, willySprite[:], screen.DrawOverwrite)
+	screen.DrawSprite(e.WorkPixels[:], 112, 15, data.PlinthGraphic[:], screen.DrawOverwrite)
+
+	e.State = StateGameOver
+	e.AnimCounter = 0
+	e.GameOverPhase = 0
+	e.GameOverBootY = 0
+	e.GameOverGlisten = 0
 }
 
 // stepGameOver handles the game over sequence from the original.
@@ -463,28 +486,6 @@ func (e *GameEnv) stepDying() {
 // Phase 3: Return to title.
 func (e *GameEnv) stepGameOver() {
 	e.AnimCounter++
-
-	// Update high score (done once at the start).
-	if e.AnimCounter == 1 {
-		currentScore := string(e.Score[4:])
-		highScore := string(e.HighScore[:])
-		if currentScore > highScore {
-			copy(e.HighScore[:], e.Score[4:])
-		}
-
-		// Clear the pixel buffer and draw Willy + plinth.
-		for i := range e.WorkPixels {
-			e.WorkPixels[i] = 0
-		}
-		// Willy at (12,15): pixel y=96, cellX=15.
-		willySprite := data.WillySprites[2] // Frame 2 (WillySpriteData1).
-		screen.DrawSprite(e.WorkPixels[:], 96, 15, willySprite[:], screen.DrawOverwrite)
-		// Plinth at (14,15): pixel y=112, cellX=15.
-		screen.DrawSprite(e.WorkPixels[:], 112, 15, data.PlinthGraphic[:], screen.DrawOverwrite)
-
-		e.GameOverPhase = 0
-		e.GameOverBootY = 0
-	}
 
 	switch e.GameOverPhase {
 	case 0:
