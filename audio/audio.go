@@ -13,7 +13,7 @@ import (
 const (
 	sampleRate    = 44100
 	spectrumClock = 3500000.0
-	volume        = 0.35
+	volume        = 0.10
 )
 
 // Player manages audio output for the game.
