@@ -16,10 +16,9 @@ const (
 
 // Player manages audio output for the game.
 type Player struct {
-	context   *audio.Context
-	player    *audio.Player
-	stream    *toneStream
-	speedMult float64 // Frequency multiplier. Default 1.0.
+	context *audio.Context
+	player  *audio.Player
+	stream  *toneStream
 }
 
 // NewPlayer creates a new audio Player.
@@ -30,10 +29,9 @@ func NewPlayer() *Player {
 	player.Play()
 
 	return &Player{
-		context:   ctx,
-		player:    player,
-		stream:    stream,
-		speedMult: 1.0,
+		context: ctx,
+		player:  player,
+		stream:  stream,
 	}
 }
 
@@ -59,18 +57,13 @@ func (p *Player) IsTunePlaying() bool {
 }
 
 // PlayInGameNote plays a single in-game music note as a short burst.
-// SetSpeedMultiplier adjusts the frequency multiplier for tuning.
-func (p *Player) SetSpeedMultiplier(m float64) {
-	p.speedMult = m
-}
-
 // PlayInGameNote sustains a tone until the next call changes the frequency.
 func (p *Player) PlayInGameNote(freq byte) {
 	if freq == 0 {
 		p.stream.setTone(0, 0)
 		return
 	}
-	hz := spectrumClock / (float64(freq) * 80.0) * p.speedMult
+	hz := spectrumClock / (float64(freq) * 80.0)
 	p.stream.setTone(hz, 0)
 }
 

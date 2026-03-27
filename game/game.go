@@ -26,8 +26,9 @@ type Game struct {
 	lastObs     engine.Observation
 	cheat       CheatState
 
-	// Music speed tuning. Press F1/F2 to adjust, F3 to print current value.
-	MusicSpeedMult float64 // Multiplier for audio frequencies. Default 1.0.
+	// Music tempo tuning. Minus/Equals to adjust note counter increment per frame.
+	// Default 1 (original). Higher = faster tempo without changing pitch.
+	MusicTempo int
 }
 
 // New creates a new Game instance for human play.
@@ -39,7 +40,7 @@ func New() *Game {
 		display:        ebiten.NewImage(ScreenWidth, ScreenHeight),
 		audioPlayer:    audio.NewPlayer(),
 		lastObs:        env.GetObservation(),
-		MusicSpeedMult: 1.0,
+		MusicTempo: 1,
 	}
 	return g
 }
@@ -88,19 +89,18 @@ func (g *Game) logicTick() {
 		}
 	}
 
-	// Music speed tuning: minus (-) = slower, equals (=) = faster, backslash (\) = print.
-	if ebiten.IsKeyPressed(ebiten.KeyMinus) {
-		g.MusicSpeedMult *= 0.99
-		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
+	// Music tempo tuning: minus (-) = slower, equals (=) = faster.
+	// Adjusts note counter increment per frame (1=original, 2=double speed, etc).
+	if ebiten.IsKeyPressed(ebiten.KeyMinus) && g.MusicTempo > 1 {
+		g.MusicTempo--
+		fmt.Printf("Music tempo: %d notes/frame\n", g.MusicTempo)
 	}
 	if ebiten.IsKeyPressed(ebiten.KeyEqual) {
-		g.MusicSpeedMult *= 1.01
-		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyBackslash) {
-		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
+		g.MusicTempo++
+		fmt.Printf("Music tempo: %d notes/frame\n", g.MusicTempo)
 	}
 
+	g.env.MusicTempoOverride = g.MusicTempo
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 
@@ -110,7 +110,6 @@ func (g *Game) logicTick() {
 
 // updateAudio manages sound based on game state.
 func (g *Game) updateAudio() {
-	g.audioPlayer.SetSpeedMultiplier(g.MusicSpeedMult)
 	switch g.env.State {
 	case engine.StateTitle:
 		if g.env.TitlePhase == 0 {
