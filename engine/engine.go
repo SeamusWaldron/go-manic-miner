@@ -418,8 +418,8 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 	e.decreaseAir()
 
 	// Advance in-game music note.
-	// Advance in-game music. Increase step size until tempo sounds right.
-	e.MusicNoteIndex = (e.MusicNoteIndex + 6) & 63
+	// Advance in-game music note index by 1 each frame (matching original).
+	e.MusicNoteIndex = (e.MusicNoteIndex + 1) & 63
 
 	// Check death.
 	if !e.Willy.Alive {
