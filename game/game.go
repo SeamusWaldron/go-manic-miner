@@ -27,9 +27,10 @@ type Game struct {
 	cheat       CheatState
 
 	// Separate music counter (independent of MusicNoteIndex used for lives).
-	musicCounter int
-	musicStep    int // Notes per frame. Adjust with -/= keys.
-	keyDebounce  int
+	musicCounter    int
+	musicStep       int // Note duration in ms. Adjust with -/= keys.
+	keyDebounce     int
+	musicToggleHeld bool
 }
 
 // New creates a new Game instance for human play.
@@ -77,6 +78,19 @@ func (g *Game) logicTick() {
 			g.lastObs = g.env.Reset(g.env.CavernNumber)
 			return
 		}
+	}
+
+	// Toggle music with H-L or Enter (debounced).
+	if inp.MusicToggle {
+		if !g.musicToggleHeld {
+			g.env.MusicEnabled = !g.env.MusicEnabled
+			if !g.env.MusicEnabled {
+				g.audioPlayer.StopInGameMusic()
+			}
+			g.musicToggleHeld = true
+		}
+	} else {
+		g.musicToggleHeld = false
 	}
 
 	// Check cheat code (6031769).
