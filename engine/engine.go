@@ -417,9 +417,10 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 	// Decrease air.
 	e.decreaseAir()
 
-	// Advance in-game music note.
-	// Advance in-game music note index by 1 each frame (matching original).
-	e.MusicNoteIndex = (e.MusicNoteIndex + 1) & 63
+	// Advance in-game music. Original: INC MusicNoteIndex (0-255 wrapping).
+	// Note lookup: (MusicNoteIndex AND 126) >> 1 gives note 0-63.
+	// Each note plays for 2 frames. Full cycle = 128 frames.
+	e.MusicNoteIndex = (e.MusicNoteIndex + 1) & 255
 
 	// Check death.
 	if !e.Willy.Alive {

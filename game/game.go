@@ -117,7 +117,7 @@ func (g *Game) updateAudio() {
 			g.audioPlayer.Silence()
 		}
 		if g.env.MusicEnabled {
-			noteIdx := g.env.MusicNoteIndex & 63
+			noteIdx := (g.env.MusicNoteIndex & 126) >> 1 // Original: AND 126; RRCA.
 			freq := data.InGameTuneData[noteIdx]
 			g.audioPlayer.PlayInGameNote(freq)
 		} else {

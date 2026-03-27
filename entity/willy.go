@@ -69,13 +69,53 @@ func (w *Willy) SpriteData() []byte {
 }
 
 // Update processes one frame of Willy logic.
+// Matches the original Z80 flow:
+//   MoveWilly1 handles jumping/falling.
+//     - During jump (except JC=13/16): goes to MV2x7 (continue existing
+//       movement only, NO keyboard input).
+//     - At JC=13/16 with ground: goes to MoveWilly2 (full keyboard + movement).
+//     - When falling starts: STOPS horizontal movement.
+//   MoveWilly2 handles keyboard input, conveyor, direction changes, jump start.
+//     - Only called when NOT airborne, or at JC=13/16 landing points.
 func (w *Willy) Update(inp action.Action, cav *cavern.Cavern,
 	emptyAttrs []byte, emptyPixels []byte, workAttrs []byte) {
 	if !w.Alive {
 		return
 	}
+
+	prevAirborne := w.Airborne
+
+	// MoveWilly1: handle jumping and falling.
 	w.moveWilly1(cav, emptyAttrs, emptyPixels)
+
+	if w.Airborne == 1 && prevAirborne == 1 {
+		// Still jumping (didn't just land). Original skips keyboard and goes
+		// to MV2x7: only continue existing horizontal movement.
+		w.continueExistingMovement(cav, emptyAttrs)
+		return
+	}
+
+	if w.Airborne >= 2 {
+		// Falling — no keyboard input, no horizontal movement.
+		// Original: RES bit 1 (stop movement) already done in checkGround/handleJump.
+		return
+	}
+
+	// Grounded (Airborne=0) or just landed — full keyboard + movement.
 	w.moveWilly2(inp, cav, emptyAttrs)
+}
+
+// continueExistingMovement handles horizontal movement during a jump
+// WITHOUT reading the keyboard. Matches original MV2x7.
+func (w *Willy) continueExistingMovement(cav *cavern.Cavern, attrs []byte) {
+	if !w.IsMoving() {
+		return
+	}
+	if w.Direction() == 1 {
+		w.moveLeft(cav, attrs)
+	} else {
+		w.moveRight(cav, attrs)
+	}
 }
 
 // moveWilly1 handles jumping and falling.
@@ -103,18 +143,13 @@ func (w *Willy) handleJump(cav *cavern.Cavern, attrs []byte, pixels []byte) {
 
 	// Check wall collision at top of sprite.
 	if w.checkWallAbove(cav, attrs) {
-		// Snap Y2 so pixel Y aligns to next cell boundary below wall.
-		// Original: ADD A,16; AND 240 (applied to pixel Y, i.e. Y2/2)
-		pxY := w.PixelY()
-		pxY = ((pxY / 16) + 1) * 16
-		if pxY > 112 {
-			pxY = 112
-		}
-		w.Y2 = pxY * 2
+		// Original: LD A,(WillysPixelYCoord); ADD A,16; AND 240
+		// This snaps Y2 to the next 16-boundary below (pixel Y to next 8-boundary).
+		w.Y2 = (w.Y2 + 16) & 0xF0
 		w.syncCellY()
-		w.Airborne = 2
-		w.DirFlags &^= 2
-		return
+		w.Airborne = 2    // Start falling.
+		w.DirFlags &^= 2  // Stop horizontal movement.
+		return             // Return — no more processing this frame.
 	}
 
 	w.JumpCount++
