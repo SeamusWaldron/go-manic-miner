@@ -212,18 +212,17 @@ func (g *Game) drawAirBar() {
 	red := color.RGBA{215, 0, 0, 255}
 	white := color.RGBA{215, 215, 215, 255}
 
-	// Step 1: Fill the ENTIRE character row (y=136-143, all 32 columns)
-	// with green (remaining) or red (depleted) background.
-	// Columns 0-3 are the "AIR" label area.
-	// Columns 4-31 are the bar area. Cell is "remaining" if cell-4 < airLength.
+	// Step 1: Fill the ENTIRE character row (y=136-143).
+	// Columns 0-3: red background ("AIR" label).
+	// Columns 4-31: green background (the bar area — stays green always,
+	// the white gauge shrinks to reveal green, not red).
 	for y := 136; y < 144; y++ {
 		for col := 0; col < 32; col++ {
 			var c color.RGBA
-			barCell := col - 4
-			if barCell >= 0 && barCell < airLength {
-				c = green
-			} else {
+			if col < 4 {
 				c = red
+			} else {
+				c = green
 			}
 			for bit := 0; bit < 8; bit++ {
 				x := col*8 + bit

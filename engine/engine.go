@@ -420,8 +420,8 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 	// Advance in-game music note.
 	// Original increments a 0-255 counter each frame at ~20 FPS, then maps
 	// to notes 0-63 via (counter AND 126) >> 1. Each note plays 2 frames.
-	// At our 12 FPS, advance by 2 to approximate the original's tempo.
-	e.MusicNoteIndex = (e.MusicNoteIndex + 2) & 63
+	// At our 12 FPS, advance by 3 to get the right tempo (~2.7s per cycle).
+	e.MusicNoteIndex = (e.MusicNoteIndex + 3) & 63
 
 	// Check death.
 	if !e.Willy.Alive {
