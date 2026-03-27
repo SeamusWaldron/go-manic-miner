@@ -172,12 +172,14 @@ func (g *Game) drawPlaying() {
 }
 
 func (g *Game) drawGameOver() {
-	g.display.Fill(color.Black)
-	screen.PrintMessage(g.display, 10*8, 6*8, "Game", 0)
-	screen.PrintMessage(g.display, 18*8, 6*8, "Over", 0)
+	// Render the pixel/attribute buffers (boot descent, colour cycling).
+	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
 
-	highScoreText := "High Score " + string(g.env.HighScore[:]) + "   Score " + string(g.lastObs.Score[:])
-	screen.PrintMessage(g.display, 0, 152, highScoreText, 0)
+	// Draw "Game Over" text during phases 1+ (after boot has landed).
+	if g.env.GameOverPhase >= 1 {
+		screen.PrintMessage(g.display, 10*8, 6*8, "Game", 0x47)
+		screen.PrintMessage(g.display, 18*8, 6*8, "Over", 0x47)
+	}
 }
 
 func (g *Game) renderHUD() {

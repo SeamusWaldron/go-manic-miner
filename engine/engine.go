@@ -74,6 +74,11 @@ type GameEnv struct {
 	// Demo mode.
 	DemoCounter int
 
+	// Game over sequence state.
+	GameOverPhase   int
+	GameOverBootY   int
+	GameOverGlisten int
+
 	// Internal tracking.
 	prevScoreInt int
 	levelDone    bool
@@ -451,19 +456,101 @@ func (e *GameEnv) stepDying() {
 	}
 }
 
-// stepGameOver handles the game over sequence.
+// stepGameOver handles the game over sequence from the original.
+// Phase 0: Boot descends onto Willy standing on plinth (49 steps of 4 Y2 units).
+// Phase 1: "Game Over" text displayed.
+// Phase 2: Text glistens with cycling INK colours (6*256 iterations).
+// Phase 3: Return to title.
 func (e *GameEnv) stepGameOver() {
 	e.AnimCounter++
 
-	// Update high score.
-	currentScore := string(e.Score[4:])
-	highScore := string(e.HighScore[:])
-	if currentScore > highScore {
-		copy(e.HighScore[:], e.Score[4:])
+	// Update high score (done once at the start).
+	if e.AnimCounter == 1 {
+		currentScore := string(e.Score[4:])
+		highScore := string(e.HighScore[:])
+		if currentScore > highScore {
+			copy(e.HighScore[:], e.Score[4:])
+		}
+
+		// Clear the pixel buffer and draw Willy + plinth.
+		for i := range e.WorkPixels {
+			e.WorkPixels[i] = 0
+		}
+		// Willy at (12,15): pixel y=96, cellX=15.
+		willySprite := data.WillySprites[2] // Frame 2 (WillySpriteData1).
+		screen.DrawSprite(e.WorkPixels[:], 96, 15, willySprite[:], screen.DrawOverwrite)
+		// Plinth at (14,15): pixel y=112, cellX=15.
+		screen.DrawSprite(e.WorkPixels[:], 112, 15, data.PlinthGraphic[:], screen.DrawOverwrite)
+
+		e.GameOverPhase = 0
+		e.GameOverBootY = 0
 	}
 
-	if e.AnimCounter >= 96 {
+	switch e.GameOverPhase {
+	case 0:
+		// Boot descent. Original: distance increments by 4 each step until 196.
+		if e.GameOverBootY < 196 {
+			// Draw boot at current Y position, cellX=15.
+			// Boot is drawn WITHOUT erasing previous position (extends trouser leg).
+			bootPixelY := e.GameOverBootY / 2
+			if bootPixelY >= 0 && bootPixelY < 112 {
+				screen.DrawSprite(e.WorkPixels[:], bootPixelY, 15, data.BootGraphic[:], screen.DrawOverwrite)
+			}
+
+			// Cycle background colour. Original: (distance AND 12) << 1 | 71.
+			attr := byte(((e.GameOverBootY & 12) << 1) | 71)
+			for i := range e.WorkAttr {
+				e.WorkAttr[i] = attr
+			}
+
+			e.GameOverBootY += 4
+		} else {
+			e.GameOverPhase = 1
+			e.AnimCounter = 0
+		}
+
+	case 1:
+		// "Game Over" text appears. Brief pause then start glistening.
+		// Set a neutral attribute for the whole screen.
+		for i := range e.WorkAttr {
+			e.WorkAttr[i] = 0x47 // INK 7, PAPER 0, BRIGHT 1.
+		}
+		if e.AnimCounter >= 4 {
+			e.GameOverPhase = 2
+			e.AnimCounter = 0
+			e.GameOverGlisten = 0
+		}
+
+	case 2:
+		// Glistening "Game Over" text. Original: 6 outer loops * 256 inner loops.
+		// We approximate: 96 frames (~6 seconds at 16 FPS).
+		for i := range e.WorkAttr {
+			e.WorkAttr[i] = 0x47
+		}
+
+		// Cycle INK colours for each letter of "Game Over".
+		// Letters at attribute positions: (6,10)-(6,13) and (6,18)-(6,21).
+		baseColour := byte(e.GameOverGlisten)
+		gamePos := []int{6*32 + 10, 6*32 + 11, 6*32 + 12, 6*32 + 13}
+		overPos := []int{6*32 + 18, 6*32 + 19, 6*32 + 20, 6*32 + 21}
+		for i, pos := range append(gamePos, overPos...) {
+			ink := (baseColour + byte(i)) & 0x07
+			if pos < len(e.WorkAttr) {
+				e.WorkAttr[pos] = 0x40 | ink // BRIGHT 1 + cycling INK.
+			}
+		}
+		e.GameOverGlisten++
+
+		if e.AnimCounter >= 96 {
+			e.GameOverPhase = 3
+		}
+
+	case 3:
 		// Return to title screen.
+		e.Lives = 2
+		for i := range e.Score {
+			e.Score[i] = '0'
+		}
 		e.initTitle()
 	}
 }
