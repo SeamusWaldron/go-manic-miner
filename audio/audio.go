@@ -1,80 +1,85 @@
-// Package audio provides ZX Spectrum beeper sound emulation using Ebitengine audio.
+// Package audio provides ZX Spectrum beeper sound emulation using oto directly
+// (bypassing Ebitengine's audio pipeline for low latency).
 package audio
 
 import (
 	"math"
 	"sync"
+	"time"
 
-	"github.com/hajimehoshi/ebiten/v2/audio"
+	"github.com/ebitengine/oto/v3"
 )
 
 const (
 	sampleRate    = 44100
 	spectrumClock = 3500000.0
-	volume        = 0.35 // Louder to compensate for short burst duty cycle.
+	volume        = 0.35
 )
 
 // Player manages audio output for the game.
 type Player struct {
-	context *audio.Context
-	player  *audio.Player
-	stream  *toneStream
+	ctx    *oto.Context
+	player *oto.Player
+	stream *toneStream
 }
 
-// NewPlayer creates a new audio Player.
+// NewPlayer creates a new audio Player with low-latency oto backend.
 func NewPlayer() *Player {
-	ctx := audio.NewContext(sampleRate)
+	op := &oto.NewContextOptions{
+		SampleRate:   sampleRate,
+		ChannelCount: 2,
+		Format:       oto.FormatFloat32LE,
+		BufferSize:   20 * time.Millisecond, // Low latency.
+	}
+	ctx, ready, err := oto.NewContext(op)
+	if err != nil {
+		panic(err)
+	}
+	<-ready
+
 	stream := newToneStream()
-	player, _ := ctx.NewPlayerF32(stream)
-	// Buffer size balances latency vs crackling.
-	// 2048 stereo float32 samples = ~46ms latency.
-	player.SetBufferSize(2048 * 2 * 4)
+	player := ctx.NewPlayer(stream)
 	player.Play()
 
 	return &Player{
-		context: ctx,
-		player:  player,
-		stream:  stream,
+		ctx:    ctx,
+		player: player,
+		stream: stream,
 	}
 }
 
-// PlayTune starts playing the title tune (Blue Danube). The tune plays at
-// the correct tempo internally — the caller doesn't need to step through notes.
-// tuneData is the raw note data (3 bytes per note: duration, freq1, freq2, terminated by $FF).
+// PlayTune starts the title tune (Blue Danube).
 func (p *Player) PlayTune(tuneData []byte) {
 	p.stream.startTune(tuneData)
 }
 
-// TuneNoteIndex returns the index of the note currently being played (for piano key animation).
+// TuneNoteIndex returns the current tune note index.
 func (p *Player) TuneNoteIndex() int {
 	p.stream.mu.Lock()
 	defer p.stream.mu.Unlock()
 	return p.stream.tuneNoteIdx
 }
 
-// IsTunePlaying returns true if the title tune is still playing.
+// IsTunePlaying returns true if the title tune is playing.
 func (p *Player) IsTunePlaying() bool {
 	p.stream.mu.Lock()
 	defer p.stream.mu.Unlock()
 	return p.stream.tunePlaying
 }
 
-// PlayInGameNote plays a single in-game music note as a short burst.
-// StartInGameMusic begins the in-game music loop. The audio stream handles
-// note advancement internally at the correct tempo. noteDurationMs controls
-// how long each note plays (in milliseconds).
+// StartInGameMusic begins the in-game music loop.
 func (p *Player) StartInGameMusic(tuneData []byte, noteDurationMs int) {
 	p.stream.startInGameMusic(tuneData, noteDurationMs)
 }
 
-// SetInGameMusicTempo changes the note duration while playing.
+// SetInGameMusicTempo changes note duration while playing.
 func (p *Player) SetInGameMusicTempo(noteDurationMs int) {
 	p.stream.mu.Lock()
 	if noteDurationMs < 5 {
 		noteDurationMs = 5
 	}
 	p.stream.igmNoteSamples = sampleRate * noteDurationMs / 1000
-	p.stream.igmSilenceSamples = p.stream.igmNoteSamples / 2 // 33% silence gap.
+	p.stream.igmSilenceSamples = p.stream.igmNoteSamples / 2
 	p.stream.mu.Unlock()
 }
 
@@ -85,42 +90,36 @@ func (p *Player) IsInGameMusicPlaying() bool {
 	return p.stream.igmPlaying
 }
 
-// StopInGameMusic stops the in-game music loop.
+// StopInGameMusic stops the in-game music.
 func (p *Player) StopInGameMusic() {
 	p.stream.mu.Lock()
 	p.stream.igmPlaying = false
-	p.stream.freq1 = 0
-	p.stream.freq2 = 0
 	p.stream.mu.Unlock()
 }
 
-// PlaySFX plays a sound effect (jump/fall). Pitch is the D parameter
-// from the original Z80 code.
+// PlaySFX plays a sound effect (jump/fall).
 func (p *Player) PlaySFX(pitch int) {
 	if pitch <= 0 {
 		return
 	}
-	// Convert D parameter to Hz.
-	// Original: half period = D * 13 T-states, full cycle = D * 26 T.
 	hz := spectrumClock / (float64(pitch) * 26.0)
-	// Original burst is ~8ms (too short for software playback — sounds like
-	// a click). Use 40ms which gives enough cycles for audible pitch while
-	// keeping the percussive character. At 16 FPS (62ms frames), this leaves
-	// a ~22ms gap between successive jump/fall notes.
-	dur := sampleRate * 40 / 1000 // 40ms = 1764 samples.
+	dur := sampleRate * 40 / 1000 // 40ms burst.
 	p.stream.playBurst(hz, dur)
 }
 
-// Silence stops all audio output.
+// Silence stops all audio immediately.
 func (p *Player) Silence() {
-	p.stream.stopTune()
-	p.StopInGameMusic()
-	p.stream.setTone(0, 0)
+	p.stream.mu.Lock()
+	p.stream.tunePlaying = false
+	p.stream.igmPlaying = false
+	p.stream.freq1 = 0
+	p.stream.freq2 = 0
+	p.stream.burstSamplesLeft = 0
+	p.stream.tuneSamplesLeft = 0
+	p.stream.mu.Unlock()
 }
 
-// toneStream generates square wave tones and handles tune playback.
-// Thread-safe: control methods called from game goroutine,
-// Read called from audio goroutine.
+// toneStream generates square wave tones.
 type toneStream struct {
 	mu     sync.Mutex
 	freq1  float64
@@ -128,23 +127,23 @@ type toneStream struct {
 	phase1 float64
 	phase2 float64
 
-	// Tune playback state (managed internally by Read).
+	// Title tune.
 	tunePlaying     bool
 	tuneData        []byte
 	tuneNoteIdx     int
-	tuneSamplesLeft int // Samples remaining for current note.
+	tuneSamplesLeft int
 
-	// Burst mode (SFX): plays its own frequency, overriding other sources.
+	// Burst (SFX).
 	burstFreq        float64
 	burstSamplesLeft int
 
-	// In-game music loop (managed internally by Read).
+	// In-game music.
 	igmPlaying        bool
-	igmData           []byte  // 64-byte note frequency table.
-	igmNoteIdx        int     // 0-255 counter (mapped via AND 126 >> 1).
-	igmNoteSamples    int     // Samples per note (controls tempo).
-	igmSamplesLeft    int     // Samples remaining for current note burst.
-	igmSilenceSamples int     // Silence samples between notes.
+	igmData           []byte
+	igmNoteIdx        int
+	igmNoteSamples    int
+	igmSamplesLeft    int
+	igmSilenceSamples int
 }
 
 func newToneStream() *toneStream {
@@ -155,7 +154,6 @@ func (s *toneStream) setTone(f1, f2 float64) {
 	s.mu.Lock()
 	s.freq1 = f1
 	s.freq2 = f2
-	s.burstSamplesLeft = -1 // Continuous mode.
 	s.mu.Unlock()
 }
 
@@ -174,9 +172,8 @@ func (s *toneStream) startInGameMusic(tuneData []byte, noteDurationMs int) {
 	s.igmNoteSamples = sampleRate * noteDurationMs / 1000
 	s.igmSilenceSamples = s.igmNoteSamples / 2
 	s.igmSamplesLeft = s.igmNoteSamples
-	s.tunePlaying = false // Stop title tune if playing.
-	// Load first note.
-	noteFreq := tuneData[(s.igmNoteIdx&126)>>1]
+	s.tunePlaying = false
+	noteFreq := tuneData[0]
 	if noteFreq > 0 {
 		s.freq1 = spectrumClock / (float64(noteFreq) * 80.0)
 	}
@@ -190,20 +187,11 @@ func (s *toneStream) startTune(data []byte) {
 	s.tuneNoteIdx = 0
 	s.tuneSamplesLeft = 0
 	s.tunePlaying = true
+	s.igmPlaying = false
 	s.loadNextTuneNote()
 	s.mu.Unlock()
 }
 
-func (s *toneStream) stopTune() {
-	s.mu.Lock()
-	s.tunePlaying = false
-	s.freq1 = 0
-	s.freq2 = 0
-	s.tuneSamplesLeft = 0
-	s.mu.Unlock()
-}
-
-// loadNextTuneNote advances to the next note in the tune. Must hold mu.
 func (s *toneStream) loadNextTuneNote() {
 	offset := s.tuneNoteIdx * 3
 	if offset+2 >= len(s.tuneData) || s.tuneData[offset] == 0xFF {
@@ -212,15 +200,10 @@ func (s *toneStream) loadNextTuneNote() {
 		s.freq2 = 0
 		return
 	}
-
 	duration := s.tuneData[offset]
 	freq1 := s.tuneData[offset+1]
 	freq2 := s.tuneData[offset+2]
 
-	// Convert frequency params to Hz.
-	// Title tune loop: ~56 T-states per inner iteration, 256 inner iterations.
-	// Note duration = duration * 256 * 56 / 3500000 seconds.
-	// In samples: duration * 256 * 56 / 3500000 * 44100.
 	noteDurationSecs := float64(duration) * 256.0 * 56.0 / spectrumClock
 	s.tuneSamplesLeft = int(noteDurationSecs * float64(sampleRate))
 
@@ -238,7 +221,7 @@ func (s *toneStream) loadNextTuneNote() {
 
 // Read fills buf with stereo float32 samples.
 func (s *toneStream) Read(buf []byte) (int, error) {
-	bytesPerSample := 8 // 2 channels × 4 bytes per float32.
+	bytesPerSample := 8
 	numSamples := len(buf) / bytesPerSample
 	written := 0
 
@@ -251,7 +234,7 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 	s.mu.Unlock()
 
 	for i := 0; i < numSamples; i++ {
-		// In-game music: manage note timing internally.
+		// In-game music.
 		if igm {
 			s.mu.Lock()
 			s.igmSamplesLeft--
@@ -271,17 +254,17 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 				f1 = s.freq1
 				f2 = 0
 			} else if s.igmSamplesLeft <= s.igmSilenceSamples {
-				// In the silence gap between notes.
 				f1 = 0
 				f2 = 0
 			} else {
 				f1 = s.freq1
 				f2 = 0
 			}
+			igm = s.igmPlaying
 			s.mu.Unlock()
 		}
 
-		// If playing a title tune, check if current note has expired.
+		// Title tune.
 		if playing {
 			s.mu.Lock()
 			s.tuneSamplesLeft--
@@ -295,7 +278,7 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 			s.mu.Unlock()
 		}
 
-		// Burst mode (SFX): overrides all other audio when active.
+		// Burst (SFX) overrides everything.
 		if burst > 0 {
 			burst--
 			f1 = s.burstFreq
@@ -312,7 +295,6 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 			s.phase1 += f1 / float64(sampleRate)
 			s.phase1 -= math.Floor(s.phase1)
 		}
-
 		if f2 > 0 {
 			if s.phase2 < 0.5 {
 				sample += volume * 0.7
@@ -337,7 +319,6 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 		written += bytesPerSample
 	}
 
-	// Write back burst counter.
 	s.mu.Lock()
 	s.burstSamplesLeft = burst
 	s.mu.Unlock()
