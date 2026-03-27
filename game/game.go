@@ -21,6 +21,7 @@ type Game struct {
 	accumulator float64
 	paused      bool
 	lastObs     engine.Observation
+	cheat       CheatState
 }
 
 // New creates a new Game instance for human play.
@@ -67,8 +68,17 @@ func (g *Game) logicTick() {
 		}
 	}
 
-	// For title screen, any key starts the game (mapped through action).
-	// For other states, just pass the action through.
+	// Check cheat code (6031769).
+	g.cheat.Update()
+
+	// Check teleport (cheat mode + 6 held + 1-5).
+	if g.env.State == engine.StatePlaying {
+		if dest := g.cheat.CheckTeleport(); dest >= 0 {
+			g.lastObs = g.env.Reset(dest)
+			return
+		}
+	}
+
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 }
