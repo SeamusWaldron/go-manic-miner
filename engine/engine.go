@@ -83,8 +83,6 @@ type GameEnv struct {
 	SoundRequest int // 0=none, 1=jump, 2=fall.
 	SoundPitch   int // Pitch parameter.
 
-	// Music tempo override. Set by wrapper. 0 or 1 = normal (+1 per frame).
-	MusicTempoOverride int
 
 	// Internal tracking.
 	prevScoreInt int
@@ -453,13 +451,8 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 	// Decrease air.
 	e.decreaseAir()
 
-	// Advance in-game music counter. Original increments by 1 per frame.
-	// MusicTempoOverride allows adjusting the increment for tempo tuning.
-	inc := 1
-	if e.MusicTempoOverride > 1 {
-		inc = e.MusicTempoOverride
-	}
-	e.MusicNoteIndex = (e.MusicNoteIndex + inc) & 255
+	// Advance in-game music. Original increments by 1 per frame (0-255 wrapping).
+	e.MusicNoteIndex = (e.MusicNoteIndex + 1) & 255
 
 	// Check death.
 	if !e.Willy.Alive {

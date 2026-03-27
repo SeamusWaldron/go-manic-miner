@@ -11,7 +11,7 @@ import (
 const (
 	sampleRate    = 44100
 	spectrumClock = 3500000.0
-	volume        = 0.20
+	volume        = 0.35 // Louder to compensate for short burst duty cycle.
 )
 
 // Player manages audio output for the game.
@@ -57,14 +57,18 @@ func (p *Player) IsTunePlaying() bool {
 }
 
 // PlayInGameNote plays a single in-game music note as a short burst.
-// PlayInGameNote sustains a tone until the next call changes the frequency.
+// PlayInGameNote plays a short burst matching the original's ~8.8ms duration.
+// The original plays 768 iterations of a ~40 T-state loop = 30,720 T = 8.8ms.
+// This staccato articulation is what makes the tune sound fast and energetic.
 func (p *Player) PlayInGameNote(freq byte) {
 	if freq == 0 {
 		p.stream.setTone(0, 0)
 		return
 	}
 	hz := spectrumClock / (float64(freq) * 80.0)
-	p.stream.setTone(hz, 0)
+	// 8.8ms at 44100 Hz = 388 samples. Use 600 samples (~14ms) for slightly
+	// better pitch audibility while keeping the staccato character.
+	p.stream.playBurst(hz, 600)
 }
 
 // PlaySFX plays a short sound effect (jump/fall). Pitch is the D parameter

@@ -3,7 +3,6 @@
 package game
 
 import (
-	"fmt"
 	"image/color"
 
 	"manicminer/audio"
@@ -26,9 +25,6 @@ type Game struct {
 	lastObs     engine.Observation
 	cheat       CheatState
 
-	// Music tempo tuning. Minus/Equals to adjust note counter increment per frame.
-	// Default 1 (original). Higher = faster tempo without changing pitch.
-	MusicTempo int
 }
 
 // New creates a new Game instance for human play.
@@ -40,7 +36,6 @@ func New() *Game {
 		display:        ebiten.NewImage(ScreenWidth, ScreenHeight),
 		audioPlayer:    audio.NewPlayer(),
 		lastObs:        env.GetObservation(),
-		MusicTempo: 1,
 	}
 	return g
 }
@@ -89,18 +84,6 @@ func (g *Game) logicTick() {
 		}
 	}
 
-	// Music tempo tuning: minus (-) = slower, equals (=) = faster.
-	// Adjusts note counter increment per frame (1=original, 2=double speed, etc).
-	if ebiten.IsKeyPressed(ebiten.KeyMinus) && g.MusicTempo > 1 {
-		g.MusicTempo--
-		fmt.Printf("Music tempo: %d notes/frame\n", g.MusicTempo)
-	}
-	if ebiten.IsKeyPressed(ebiten.KeyEqual) {
-		g.MusicTempo++
-		fmt.Printf("Music tempo: %d notes/frame\n", g.MusicTempo)
-	}
-
-	g.env.MusicTempoOverride = g.MusicTempo
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 
