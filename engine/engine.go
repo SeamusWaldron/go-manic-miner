@@ -101,10 +101,12 @@ func (e *GameEnv) initTitle() {
 	e.MusicNoteIndex = 0
 
 	// Build title screen buffers.
-	// Top two-thirds: title screen graphic data.
-	copy(e.WorkPixels[:], data.TitleScreenPixels[:])
+	// The title screen graphic data is in raw ZX Spectrum display file format
+	// (interleaved thirds). Convert to our linearised pixel buffer layout.
+	screen.SpectrumDisplayToLinear(data.TitleScreenPixels[:], e.WorkPixels[:])
 
-	// Attributes: top third from The Final Barrier cavern data, bottom two-thirds from BottomAttributes.
+	// Attributes: top third from The Final Barrier cavern data,
+	// bottom two-thirds from BottomAttributes.
 	finalBarrier := cavern.Load(19)
 	if finalBarrier != nil {
 		copy(e.WorkAttr[0:256], finalBarrier.Attributes[0:256])

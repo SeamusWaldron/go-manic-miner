@@ -41,3 +41,35 @@ func PixelBufOffset(pixelY, cellX int) int {
 func AttrBufOffset(cellRow, cellCol int) int {
 	return cellRow*32 + cellCol
 }
+
+// SpectrumDisplayToLinear converts raw ZX Spectrum display file data into
+// our linearised pixel buffer format.
+//
+// The Spectrum display file for the top two-thirds (4096 bytes, $4000-$4FFF)
+// uses an interleaved layout:
+//
+//	Address bits: 010T TRRR CCCL LLLL
+//	  T  = third (0-1, covering char rows 0-7 and 8-15)
+//	  R  = pixel row within character cell (0-7)
+//	  C  = character row within third (0-7)
+//	  L  = column (0-31)
+//
+// Our buffer uses: charRow*256 + pixelRow*32 + column
+//
+// spectrumData must be 4096 bytes. linearBuf must be 4096 bytes.
+func SpectrumDisplayToLinear(spectrumData []byte, linearBuf []byte) {
+	for i := 0; i < 4096; i++ {
+		// Decode Spectrum address (offset from $4000).
+		third := (i >> 11) & 1         // bit 11
+		pixelRow := (i >> 8) & 7       // bits 8-10
+		charRowInThird := (i >> 5) & 7 // bits 5-7
+		column := i & 31               // bits 0-4
+
+		charRow := third*8 + charRowInThird
+		linearOffset := charRow*256 + pixelRow*32 + column
+
+		if linearOffset < len(linearBuf) {
+			linearBuf[linearOffset] = spectrumData[i]
+		}
+	}
+}
