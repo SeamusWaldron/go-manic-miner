@@ -88,16 +88,16 @@ func (g *Game) logicTick() {
 		}
 	}
 
-	// Music speed tuning: F1 = slower, F2 = faster, F3 = print current value.
-	if ebiten.IsKeyPressed(ebiten.KeyF1) {
+	// Music speed tuning: minus (-) = slower, equals (=) = faster, backslash (\) = print.
+	if ebiten.IsKeyPressed(ebiten.KeyMinus) {
 		g.MusicSpeedMult *= 0.99
 		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyF2) {
+	if ebiten.IsKeyPressed(ebiten.KeyEqual) {
 		g.MusicSpeedMult *= 1.01
 		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyF3) {
+	if ebiten.IsKeyPressed(ebiten.KeyBackslash) {
 		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
 	}
 
