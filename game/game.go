@@ -188,8 +188,13 @@ func (g *Game) renderHUD() {
 	// $5060 = charRow 19, y=152: "High Score ... Score ..."
 	// $50A0 = charRow 21, y=168: Lives
 
-	// Cavern name — yellow text on black.
-	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, 0x06)
+	// Cavern name row — yellow background, black text.
+	for y := 128; y < 136; y++ {
+		for x := 0; x < ScreenWidth; x++ {
+			g.display.Set(x, y, color.RGBA{215, 215, 0, 255})
+		}
+	}
+	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, 0x30) // INK 0 (black), PAPER 6 (yellow).
 
 	// AIR row: background colours + bar + "AIR" text (all handled together).
 	g.drawAirBar()
@@ -203,7 +208,7 @@ func (g *Game) renderHUD() {
 }
 
 func (g *Game) drawAirBar() {
-	airLength := g.lastObs.Air - 0x24
+	airLength := g.lastObs.Air - 0x24 // Current bar length in cells.
 	if airLength < 0 {
 		airLength = 0
 	}
@@ -212,43 +217,35 @@ func (g *Game) drawAirBar() {
 	red := color.RGBA{215, 0, 0, 255}
 	white := color.RGBA{215, 215, 215, 255}
 
-	// Step 1: Fill the ENTIRE character row (y=136-143).
-	// Columns 0-3: red background ("AIR" label).
-	// Columns 4-31: green background (the bar area — stays green always,
-	// the white gauge shrinks to reveal green, not red).
+	// The red/green split moves with the air level:
+	// LEFT of current air position = RED (depleted)
+	// RIGHT of current air position = GREEN (remaining)
+	// White bar drawn on top of the green.
+
+	// Air bar starts at column 4. airLength cells of green, rest is red.
+	// splitCol = 4 + airLength (the column where green ends and red begins).
+	splitX := (4 + airLength) * 8
+
+	// Step 1: Fill entire AIR row background.
 	for y := 136; y < 144; y++ {
-		for col := 0; col < 32; col++ {
-			var c color.RGBA
-			if col < 4 {
-				c = red
+		for x := 0; x < ScreenWidth; x++ {
+			if x < splitX {
+				g.display.Set(x, y, red)
 			} else {
-				c = green
-			}
-			for bit := 0; bit < 8; bit++ {
-				x := col*8 + bit
-				if x < ScreenWidth {
-					g.display.Set(x, y, c)
-				}
+				g.display.Set(x, y, green)
 			}
 		}
 	}
 
-	// Step 2: Draw white $FF pixel bar on top of green, 4 pixel rows (y=138-141).
-	// Original: MSB $52-$55, LSB starting at $24 (column 4).
+	// Step 2: Draw white bar on the GREEN portion (4 pixel rows, y=138-141).
 	for row := 0; row < 4; row++ {
-		for cell := 0; cell < airLength && cell < 28; cell++ {
-			for bit := 0; bit < 8; bit++ {
-				x := (cell+4)*8 + bit
-				y := 138 + row
-				if x < ScreenWidth {
-					g.display.Set(x, y, white)
-				}
-			}
+		for x := splitX; x < ScreenWidth; x++ {
+			g.display.Set(x, 138+row, white)
 		}
 	}
 
-	// Step 3: Redraw "AIR" text on top of the red background.
-	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17) // White on red.
+	// Step 3: "AIR" text on top of the red.
+	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17)
 }
 
 func (g *Game) drawLives() {
