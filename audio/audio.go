@@ -16,9 +16,10 @@ const (
 
 // Player manages audio output for the game.
 type Player struct {
-	context *audio.Context
-	player  *audio.Player
-	stream  *toneStream
+	context   *audio.Context
+	player    *audio.Player
+	stream    *toneStream
+	speedMult float64 // Frequency multiplier. Default 1.0.
 }
 
 // NewPlayer creates a new audio Player.
@@ -29,9 +30,10 @@ func NewPlayer() *Player {
 	player.Play()
 
 	return &Player{
-		context: ctx,
-		player:  player,
-		stream:  stream,
+		context:   ctx,
+		player:    player,
+		stream:    stream,
+		speedMult: 1.0,
 	}
 }
 
@@ -57,15 +59,40 @@ func (p *Player) IsTunePlaying() bool {
 }
 
 // PlayInGameNote plays a single in-game music note as a short burst.
+// SetSpeedMultiplier adjusts the frequency multiplier for tuning.
+func (p *Player) SetSpeedMultiplier(m float64) {
+	p.speedMult = m
+}
+
 // PlayInGameNote sustains a tone until the next call changes the frequency.
-// The game loop updates the note each frame, creating a continuous melody.
 func (p *Player) PlayInGameNote(freq byte) {
 	if freq == 0 {
 		p.stream.setTone(0, 0)
 		return
 	}
-	hz := spectrumClock / (float64(freq) * 80.0)
+	hz := spectrumClock / (float64(freq) * 80.0) * p.speedMult
 	p.stream.setTone(hz, 0)
+}
+
+// PlaySFX plays a short sound effect (jump/fall). Pitch is the D parameter
+// from the original Z80 code. The sound plays as a short burst.
+func (p *Player) PlaySFX(pitch int) {
+	if pitch <= 0 {
+		return
+	}
+	// Convert D parameter to Hz. Original loop: OUT, XOR, LD B,D, DJNZ.
+	// Half period = D * 13 T-states (DJNZ loop). Full cycle = D * 26 T.
+	// Hz = 3500000 / (D * 26).
+	hz := spectrumClock / (float64(pitch) * 26.0)
+	// Duration: C=32 outer loops, each D inner loops.
+	// Total = 32 * (13*D + 33) T-states. Convert to samples.
+	totalT := 32.0 * (13.0*float64(pitch) + 33.0)
+	durSecs := totalT / spectrumClock
+	dur := int(durSecs * float64(sampleRate))
+	if dur < 100 {
+		dur = 100
+	}
+	p.stream.playBurst(hz, dur)
 }
 
 // Silence stops all audio output.

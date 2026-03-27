@@ -79,6 +79,10 @@ type GameEnv struct {
 	GameOverBootY   int
 	GameOverGlisten int
 
+	// Sound request for current frame (read by wrapper for audio).
+	SoundRequest int // 0=none, 1=jump, 2=fall.
+	SoundPitch   int // Pitch parameter.
+
 	// Internal tracking.
 	prevScoreInt int
 	levelDone    bool
@@ -327,6 +331,30 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 	// Update Willy.
 	e.Willy.Update(act, e.CurrentCavern, e.EmptyAttr[:], e.EmptyPixels[:], e.EmptyAttr[:])
 
+	// Set sound request based on Willy's state.
+	// Original: jump sound at MW1x2 (D=8*(1+ABS(J-8)), C=32).
+	// Fall sound at MW1x6 (D=16*airborne, C=32).
+	e.SoundRequest = 0
+	e.SoundPitch = 0
+	if e.Willy != nil && e.Willy.Alive {
+		if e.Willy.Airborne == 1 && e.Willy.JumpCount >= 1 && e.Willy.JumpCount <= 12 {
+			j := e.Willy.JumpCount
+			absJm8 := j - 8
+			if absJm8 < 0 {
+				absJm8 = -absJm8
+			}
+			e.SoundRequest = 1
+			e.SoundPitch = 8 * (1 + absJm8) // D value from original.
+		} else if e.Willy.Airborne >= 2 && e.Willy.Airborne < 255 {
+			e.SoundRequest = 2
+			d := e.Willy.Airborne * 16
+			if d > 255 {
+				d = 255
+			}
+			e.SoundPitch = d
+		}
+	}
+
 	// Re-copy after crumbling.
 	copy(e.WorkAttr[:], e.EmptyAttr[:])
 	copy(e.WorkPixels[:], e.EmptyPixels[:])
@@ -445,7 +473,9 @@ func (e *GameEnv) stepDying() {
 		e.WorkAttr[i] = attr
 	}
 
-	if e.AnimCounter >= 32 {
+	// Original death animation takes ~0.12 seconds (8 iterations of colour
+	// flash + short sound). At 16 FPS, 0.12s ≈ 2 frames. Use 2 frames.
+	if e.AnimCounter >= 2 {
 		if e.Lives > 0 {
 			e.Lives--
 			e.Reset(e.CavernNumber)
@@ -665,6 +695,9 @@ func (e *GameEnv) buildObservation() Observation {
 	if e.CurrentCavern != nil {
 		obs.CavernName = e.CurrentCavern.Name
 	}
+
+	obs.SoundRequest = e.SoundRequest
+	obs.SoundPitch = e.SoundPitch
 
 	if e.Willy != nil {
 		obs.WillyX = e.Willy.CellX

@@ -3,6 +3,7 @@
 package game
 
 import (
+	"fmt"
 	"image/color"
 
 	"manicminer/audio"
@@ -24,17 +25,21 @@ type Game struct {
 	paused      bool
 	lastObs     engine.Observation
 	cheat       CheatState
+
+	// Music speed tuning. Press F1/F2 to adjust, F3 to print current value.
+	MusicSpeedMult float64 // Multiplier for audio frequencies. Default 1.0.
 }
 
 // New creates a new Game instance for human play.
 func New() *Game {
 	env := engine.NewGameEnv()
 	g := &Game{
-		env:         env,
-		renderer:    screen.NewRenderer(),
-		display:     ebiten.NewImage(ScreenWidth, ScreenHeight),
-		audioPlayer: audio.NewPlayer(),
-		lastObs:     env.GetObservation(),
+		env:            env,
+		renderer:       screen.NewRenderer(),
+		display:        ebiten.NewImage(ScreenWidth, ScreenHeight),
+		audioPlayer:    audio.NewPlayer(),
+		lastObs:        env.GetObservation(),
+		MusicSpeedMult: 1.0,
 	}
 	return g
 }
@@ -83,6 +88,19 @@ func (g *Game) logicTick() {
 		}
 	}
 
+	// Music speed tuning: F1 = slower, F2 = faster, F3 = print current value.
+	if ebiten.IsKeyPressed(ebiten.KeyF1) {
+		g.MusicSpeedMult *= 0.99
+		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyF2) {
+		g.MusicSpeedMult *= 1.01
+		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
+	}
+	if ebiten.IsKeyPressed(ebiten.KeyF3) {
+		fmt.Printf("Music speed: %.3f\n", g.MusicSpeedMult)
+	}
+
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 
@@ -92,6 +110,7 @@ func (g *Game) logicTick() {
 
 // updateAudio manages sound based on game state.
 func (g *Game) updateAudio() {
+	g.audioPlayer.SetSpeedMultiplier(g.MusicSpeedMult)
 	switch g.env.State {
 	case engine.StateTitle:
 		if g.env.TitlePhase == 0 {
@@ -116,8 +135,11 @@ func (g *Game) updateAudio() {
 		if g.audioPlayer.IsTunePlaying() {
 			g.audioPlayer.Silence()
 		}
-		if g.env.MusicEnabled {
-			noteIdx := (g.env.MusicNoteIndex & 126) >> 1 // Original: AND 126; RRCA.
+		// Jump/fall sound effects take priority over music.
+		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
+			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
+		} else if g.env.MusicEnabled {
+			noteIdx := (g.env.MusicNoteIndex & 126) >> 1
 			freq := data.InGameTuneData[noteIdx]
 			g.audioPlayer.PlayInGameNote(freq)
 		} else {

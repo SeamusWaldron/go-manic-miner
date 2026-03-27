@@ -23,6 +23,11 @@ type Observation struct {
 	CavernName string
 	GameClock  byte
 
+	// Sound request from the engine (for the wrapper to play).
+	// 0 = silence, 1 = jump sound, 2 = fall sound.
+	SoundRequest int
+	SoundPitch   int // Pitch parameter for the sound.
+
 	// Episode signals.
 	Done      bool // True if life lost or level complete.
 	LevelDone bool // True if portal entered (level completed).
