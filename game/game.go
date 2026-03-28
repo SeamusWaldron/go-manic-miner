@@ -90,12 +90,10 @@ func (g *Game) logicTick() {
 			g.settingsScreen = newSettingsScreen()
 		}
 		if g.settingsScreen.update(g.cfg) {
-			// Returned from settings — save and apply.
 			g.cfg.Save()
 			applyFeatures(g.env, &g.cfg.Features)
 			g.settingsScreen = nil
-			g.env.State = engine.StateTitle
-			g.env.TitleFrame = 0
+			g.env.InitTitle() // Full screen refresh.
 		}
 		return
 
@@ -105,8 +103,7 @@ func (g *Game) logicTick() {
 		}
 		if g.highScoreScr.update() {
 			g.highScoreScr = nil
-			g.env.State = engine.StateTitle
-			g.env.TitleFrame = 0
+			g.env.InitTitle() // Full screen refresh.
 		}
 		return
 

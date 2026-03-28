@@ -90,33 +90,30 @@ func (s *SettingsScreen) update(cfg *config.Config) bool {
 		}
 	}
 
-	// Name editing.
+	// Name editing: type A-Z directly. Each letter advances to next position.
 	if s.editingName && s.cursor == settingsItemName {
-		if (ebiten.IsKeyPressed(ebiten.KeyArrowLeft) || ebiten.IsKeyPressed(ebiten.KeyH)) && s.nameCursor > 0 {
-			s.nameCursor--
-			s.debounce = 6
-		}
-		if (ebiten.IsKeyPressed(ebiten.KeyArrowRight) || ebiten.IsKeyPressed(ebiten.KeyL)) && s.nameCursor < 2 {
-			s.nameCursor++
-			s.debounce = 6
-		}
 		name := []byte(cfg.PlayerName)
 		for len(name) < 3 {
 			name = append(name, 'A')
 		}
-		if up {
-			name[s.nameCursor]++
-			if name[s.nameCursor] > 'Z' {
-				name[s.nameCursor] = 'A'
+		// Check for A-Z key presses.
+		for k := ebiten.KeyA; k <= ebiten.KeyZ; k++ {
+			if ebiten.IsKeyPressed(k) {
+				letter := byte('A') + byte(k-ebiten.KeyA)
+				name[s.nameCursor] = letter
+				s.nameCursor++
+				if s.nameCursor >= 3 {
+					s.nameCursor = 0
+					s.editingName = false
+				}
+				s.debounce = 6
+				break
 			}
-			s.debounce = 4
 		}
-		if down {
-			name[s.nameCursor]--
-			if name[s.nameCursor] < 'A' {
-				name[s.nameCursor] = 'Z'
-			}
-			s.debounce = 4
+		// Backspace to go back one position.
+		if ebiten.IsKeyPressed(ebiten.KeyBackspace) && s.nameCursor > 0 {
+			s.nameCursor--
+			s.debounce = 6
 		}
 		cfg.PlayerName = string(name[:3])
 	}

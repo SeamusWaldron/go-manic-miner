@@ -114,12 +114,12 @@ func NewGameEnv() *GameEnv {
 	for i := range e.HighScore {
 		e.HighScore[i] = '0'
 	}
-	e.initTitle()
+	e.InitTitle()
 	return e
 }
 
 // initTitle sets up the title screen state.
-func (e *GameEnv) initTitle() {
+func (e *GameEnv) InitTitle() {
 	e.State = StateTitle
 	e.BannerOffset = 0
 	e.TitleFrame = 0
@@ -603,7 +603,7 @@ func (e *GameEnv) stepGameOver() {
 			for i := range e.Score {
 				e.Score[i] = '0'
 			}
-			e.initTitle()
+			e.InitTitle()
 		}
 	}
 }
