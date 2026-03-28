@@ -189,7 +189,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 		{"Warp Mode", cfg.Features.WarpMode, settingsItemWarp},
 	}
 	for _, t := range toggles {
-		row := 10 + (t.item - settingsItemInfLives)
+		row := 11 + (t.item - settingsItemInfLives)
 		// Cursor.
 		if s.cursor == t.item {
 			screen.PrintMessage(display, 1*8, row*8, cursorChar, yellow)
@@ -226,7 +226,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 	}
 
 	// Help text.
-	screen.PrintMessage(display, 2*8, 21*8, "UP/DOWN Navigate", yellow)
-	screen.PrintMessage(display, 2*8, 22*8, "ENTER  Select/Toggle", yellow)
-	screen.PrintMessage(display, 2*8, 23*8, "ESC    Back to title", yellow)
+	screen.PrintMessage(display, 2*8, 20*8, "UP/DOWN Navigate", yellow)
+	screen.PrintMessage(display, 2*8, 21*8, "ENTER  Select/Toggle", yellow)
+	screen.PrintMessage(display, 2*8, 22*8, "ESC    Back to title", yellow)
 }
