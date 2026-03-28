@@ -7,6 +7,7 @@ import (
 	"image/color"
 
 	"manicminer/audio"
+	"manicminer/config"
 	"manicminer/data"
 	"manicminer/engine"
 	"manicminer/input"
@@ -21,30 +22,51 @@ type Game struct {
 	renderer    *screen.Renderer
 	display     *ebiten.Image
 	audioPlayer *audio.Player
+	cfg         *config.Config
 	accumulator float64
 	paused      bool
 	lastObs     engine.Observation
 	cheat       CheatState
+	frameCount  int
 
-	// Separate music counter (independent of MusicNoteIndex used for lives).
-	musicCounter    int
-	musicStep       int // Note duration in ms. Adjust with -/= keys.
+	// Music.
+	musicStep       int
 	keyDebounce     int
 	musicToggleHeld bool
+
+	// Sub-screens.
+	settingsScreen *SettingsScreen
+	highScoreScr   *HighScoreScreen
+	nameEntryScr   *NameEntryScreen
 }
 
 // New creates a new Game instance for human play.
 func New() *Game {
+	cfg := config.Load()
 	env := engine.NewGameEnv()
+
+	// Apply feature flags from config.
+	applyFeatures(env, &cfg.Features)
+
 	g := &Game{
 		env:         env,
 		renderer:    screen.NewRenderer(),
 		display:     ebiten.NewImage(ScreenWidth, ScreenHeight),
 		audioPlayer: audio.NewPlayer(),
+		cfg:         cfg,
 		lastObs:     env.GetObservation(),
-		musicStep:   60, // Default note duration in ms. Adjust with -/=.
+		musicStep:   60,
 	}
 	return g
+}
+
+func applyFeatures(env *engine.GameEnv, f *config.Features) {
+	env.InfiniteLives = f.InfiniteLives
+	env.InfiniteAir = f.InfiniteAir
+	env.HarmlessHeights = f.HarmlessHeights
+	env.NoNasties = f.NoNasties
+	env.NoGuardians = f.NoGuardians
+	env.WarpMode = f.WarpMode
 }
 
 // Update is called every tick (60 FPS by Ebitengine).
@@ -58,9 +80,54 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) logicTick() {
-	inp := input.Read()
+	g.frameCount++
+	inp := input.Read(g.cfg.ControlScheme)
 
-	// Pause handling (UI-only, not sent to engine).
+	// Handle sub-screens that bypass the engine.
+	switch g.env.State {
+	case engine.StateSettings:
+		if g.settingsScreen == nil {
+			g.settingsScreen = newSettingsScreen()
+		}
+		if g.settingsScreen.update(g.cfg) {
+			// Returned from settings — save and apply.
+			g.cfg.Save()
+			applyFeatures(g.env, &g.cfg.Features)
+			g.settingsScreen = nil
+			g.env.State = engine.StateTitle
+			g.env.TitleFrame = 0
+		}
+		return
+
+	case engine.StateHighScores:
+		if g.highScoreScr == nil {
+			g.highScoreScr = newHighScoreScreen()
+		}
+		if g.highScoreScr.update() {
+			g.highScoreScr = nil
+			g.env.State = engine.StateTitle
+			g.env.TitleFrame = 0
+		}
+		return
+
+	case engine.StateNameEntry:
+		if g.nameEntryScr == nil {
+			return
+		}
+		g.nameEntryScr.update()
+		if g.nameEntryScr.Done {
+			name := g.nameEntryScr.nameString()
+			g.cfg.AddHighScore(name, g.nameEntryScr.Score, g.nameEntryScr.Cavern)
+			g.cfg.PlayerName = name
+			g.cfg.Save()
+			g.nameEntryScr = nil
+			g.env.State = engine.StateHighScores
+			g.highScoreScr = newHighScoreScreen()
+		}
+		return
+	}
+
+	// Pause handling.
 	if g.env.State == engine.StatePlaying {
 		if inp.Pause && !g.paused {
 			g.paused = true
@@ -73,14 +140,13 @@ func (g *Game) logicTick() {
 			}
 			return
 		}
-		// Quit: restart cavern.
 		if inp.Quit {
 			g.lastObs = g.env.Reset(g.env.CavernNumber)
 			return
 		}
 	}
 
-	// Toggle music with H-L or Enter (debounced).
+	// Music toggle.
 	if inp.MusicToggle {
 		if !g.musicToggleHeld {
 			g.env.MusicEnabled = !g.env.MusicEnabled
@@ -93,21 +159,18 @@ func (g *Game) logicTick() {
 		g.musicToggleHeld = false
 	}
 
-	// Check cheat code (6031769).
+	// Cheat code.
 	g.cheat.Update()
-
-	// Check teleport (cheat mode + 6 held + 1-5).
 	if g.env.State == engine.StatePlaying {
-		if dest := g.cheat.CheckTeleport(); dest >= 0 {
-			g.lastObs = g.env.Reset(dest)
-			return
+		if g.env.WarpMode || g.cheat.Active {
+			if dest := g.cheat.CheckTeleport(); dest >= 0 {
+				g.lastObs = g.env.Reset(dest)
+				return
+			}
 		}
 	}
 
-	result := g.env.Step(inp.ToAction())
-	g.lastObs = result.Obs
-
-	// Music tempo tuning: -/= adjust note duration (audio only, not gameplay).
+	// Music tempo tuning (debug).
 	if g.keyDebounce > 0 {
 		g.keyDebounce--
 	}
@@ -126,7 +189,21 @@ func (g *Game) logicTick() {
 		}
 	}
 
-	// Handle audio based on engine state.
+	// Check if game over should transition to name entry.
+	prevState := g.env.State
+	result := g.env.Step(inp.ToAction())
+	g.lastObs = result.Obs
+
+	// Detect transition from GameOver to Title — check for high score.
+	if prevState == engine.StateGameOver && g.env.State == engine.StateTitle {
+		score := g.lastObs.ScoreInt
+		if g.cfg.QualifiesForHighScore(score) {
+			g.env.State = engine.StateNameEntry
+			g.nameEntryScr = newNameEntryScreen(score, g.env.CavernNumber, g.cfg.PlayerName)
+			return
+		}
+	}
+
 	g.updateAudio()
 }
 
@@ -135,14 +212,10 @@ func (g *Game) updateAudio() {
 	switch g.env.State {
 	case engine.StateTitle:
 		if g.env.TitlePhase == 0 {
-			// Start the title tune if not already playing.
 			if !g.audioPlayer.IsTunePlaying() && g.env.TitleFrame <= 1 {
 				g.audioPlayer.PlayTune(data.TitleTuneData[:])
 			}
-			// Sync the engine's TuneNoteIndex from the audio player
-			// (for piano key animation).
 			g.env.TuneNoteIndex = g.audioPlayer.TuneNoteIndex()
-			// Check if tune finished — advance to banner phase.
 			if !g.audioPlayer.IsTunePlaying() && g.env.TitleFrame > 1 {
 				g.env.TitlePhase = 1
 				g.env.BannerOffset = 0
@@ -152,27 +225,23 @@ func (g *Game) updateAudio() {
 		}
 
 	case engine.StatePlaying:
-		// Stop the title tune once on transition.
 		if g.audioPlayer.IsTunePlaying() {
 			g.audioPlayer.Silence()
 		}
-		// Start in-game music if enabled and not already playing.
 		if g.env.MusicEnabled {
 			if !g.audioPlayer.IsInGameMusicPlaying() {
-								g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
+				g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
 			}
 		} else {
 			if g.audioPlayer.IsInGameMusicPlaying() {
 				g.audioPlayer.StopInGameMusic()
 			}
 		}
-		// Sound effects: temporarily override the music output via burst.
 		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
 		}
 
 	case engine.StateDying:
-		// Death sound.
 		g.audioPlayer.StopInGameMusic()
 		pitch := 7 + g.env.AnimCounter*8
 		if pitch > 63 {
@@ -181,7 +250,6 @@ func (g *Game) updateAudio() {
 		g.audioPlayer.PlaySFX(pitch)
 
 	case engine.StateGameOver:
-		// Boot descent sound (rising pitch) and silence during glistening.
 		if g.lastObs.SoundRequest == 5 {
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
 		}
@@ -204,6 +272,18 @@ func (g *Game) Draw(scr *ebiten.Image) {
 		g.drawPlaying()
 	case engine.StateGameOver:
 		g.drawGameOver()
+	case engine.StateSettings:
+		if g.settingsScreen != nil {
+			g.settingsScreen.draw(g.display, g.cfg, g.frameCount)
+		}
+	case engine.StateHighScores:
+		if g.highScoreScr != nil {
+			g.highScoreScr.draw(g.display, g.cfg, g.frameCount)
+		}
+	case engine.StateNameEntry:
+		if g.nameEntryScr != nil {
+			g.nameEntryScr.draw(g.display, g.frameCount)
+		}
 	}
 
 	scr.DrawImage(g.display, &ebiten.DrawImageOptions{})
@@ -213,7 +293,6 @@ func (g *Game) drawTitle() {
 	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
 
 	if g.env.TitlePhase == 1 {
-		// Draw the scrolling banner at row 19 (y=152).
 		bannerStart := g.env.BannerOffset
 		var bannerText [32]byte
 		for i := 0; i < 32; i++ {
@@ -226,6 +305,9 @@ func (g *Game) drawTitle() {
 		}
 		screen.PrintMessage(g.display, 0, 152, string(bannerText[:]), 0)
 	}
+
+	// Help text at bottom.
+	screen.PrintMessage(g.display, 0, 184, "ENTER Start  ESC Settings", 0x06)
 }
 
 func (g *Game) drawPlaying() {
@@ -234,10 +316,7 @@ func (g *Game) drawPlaying() {
 }
 
 func (g *Game) drawGameOver() {
-	// Render the pixel/attribute buffers (boot descent, colour cycling).
 	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
-
-	// Draw "Game Over" text during phases 1+ (after boot has landed).
 	if g.env.GameOverPhase >= 1 {
 		screen.PrintMessage(g.display, 10*8, 6*8, "Game", 0x47)
 		screen.PrintMessage(g.display, 18*8, 6*8, "Over", 0x47)
@@ -245,29 +324,19 @@ func (g *Game) drawGameOver() {
 }
 
 func (g *Game) renderHUD() {
-	// All positions decoded from the original display file addresses:
-	// $5000 = charRow 16, y=128: Cavern name
-	// $5020 = charRow 17, y=136: "AIR" text
-	// $5224 = charRow 17, pixRow 2, col 4, y=138: Air bar (4 pixel rows)
-	// $5060 = charRow 19, y=152: "High Score ... Score ..."
-	// $50A0 = charRow 21, y=168: Lives
-
 	// Cavern name row — yellow background, black text.
 	for y := 128; y < 136; y++ {
 		for x := 0; x < ScreenWidth; x++ {
 			g.display.Set(x, y, color.RGBA{215, 215, 0, 255})
 		}
 	}
-	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, 0x30) // INK 0 (black), PAPER 6 (yellow).
+	screen.PrintMessage(g.display, 0, 128, g.lastObs.CavernName, 0x30)
 
-	// AIR row: background colours + bar + "AIR" text (all handled together).
 	g.drawAirBar()
 
-	// "High Score ... Score ..." at (19,0) — yellow on black.
 	highScoreText := "High Score " + string(g.env.HighScore[:]) + "   Score " + string(g.lastObs.Score[:])
 	screen.PrintMessage(g.display, 0, 152, highScoreText, 0x06)
 
-	// Lives at (21,0) — y=168.
 	g.drawLives()
 }
 
@@ -276,15 +345,10 @@ func (g *Game) drawAirBar() {
 	if airLength < 0 {
 		airLength = 0
 	}
-
 	green := color.RGBA{0, 215, 0, 255}
 	red := color.RGBA{215, 0, 0, 255}
 	white := color.RGBA{215, 215, 215, 255}
 
-	// FIXED background — set once, never changes:
-	// Cols 0-3: red (AIR label area)
-	// Cols 4-30: green (initial air extent, 27 cells)
-	// Col 31: red (beyond initial air)
 	for y := 136; y < 144; y++ {
 		for col := 0; col < 32; col++ {
 			var c color.RGBA
@@ -298,9 +362,6 @@ func (g *Game) drawAirBar() {
 			}
 		}
 	}
-
-	// White gauge on top — shrinks from right as air depletes.
-	// 4 pixel rows at y=138-141 (pixel rows 2-5 of char row 17).
 	for row := 0; row < 4; row++ {
 		for cell := 0; cell < airLength; cell++ {
 			for bit := 0; bit < 8; bit++ {
@@ -308,13 +369,10 @@ func (g *Game) drawAirBar() {
 			}
 		}
 	}
-
-	// "AIR" text on the red.
 	screen.PrintMessage(g.display, 0, 136, "AIR", 0x17)
 }
 
 func (g *Game) drawLives() {
-	// Clear the lives area (y=168-183) every frame.
 	for y := 168; y < 184; y++ {
 		for x := 0; x < ScreenWidth; x++ {
 			g.display.Set(x, y, color.Black)
@@ -326,18 +384,12 @@ func (g *Game) drawLives() {
 		return
 	}
 
-	// Original: (MusicNoteIndex RLCA x3) AND $60 gives 0, 32, 64, or 96.
-	// Dividing by 32 gives frame 0-3.
 	animIdx := ((g.env.MusicNoteIndex << 3) & 0x60) >> 5
 	spriteData := data.WillySprites[animIdx]
-
 	cyan := color.RGBA{0, 215, 215, 255}
 
 	for i := 0; i < lives && i < 8; i++ {
-		// Original: lives start at $50A0, each 2 cells apart (INC HL twice).
-		// $50A0 = row 20, column 0 in bottom third. Each life shifts 2 columns right.
 		px := i * 16
-
 		for row := 0; row < 16; row++ {
 			leftByte := spriteData[row*2]
 			rightByte := spriteData[row*2+1]
@@ -353,6 +405,33 @@ func (g *Game) drawLives() {
 			for bit := 7; bit >= 0; bit-- {
 				if rightByte&(1<<uint(bit)) != 0 {
 					x := px + 8 + (7 - bit)
+					y := 168 + row
+					if x < ScreenWidth && y < ScreenHeight {
+						g.display.Set(x, y, cyan)
+					}
+				}
+			}
+		}
+	}
+
+	// Draw boot sprite when infinite lives or cheat mode is active.
+	if g.env.InfiniteLives || g.cheat.Active {
+		bootPx := lives * 16
+		for row := 0; row < 16; row++ {
+			leftByte := data.BootGraphic[row*2]
+			rightByte := data.BootGraphic[row*2+1]
+			for bit := 7; bit >= 0; bit-- {
+				if leftByte&(1<<uint(bit)) != 0 {
+					x := bootPx + (7 - bit)
+					y := 168 + row
+					if x < ScreenWidth && y < ScreenHeight {
+						g.display.Set(x, y, cyan)
+					}
+				}
+			}
+			for bit := 7; bit >= 0; bit-- {
+				if rightByte&(1<<uint(bit)) != 0 {
+					x := bootPx + 8 + (7 - bit)
 					y := 168 + row
 					if x < ScreenWidth && y < ScreenHeight {
 						g.display.Set(x, y, cyan)

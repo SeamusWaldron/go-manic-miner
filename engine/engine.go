@@ -15,12 +15,15 @@ import (
 type State int
 
 const (
-	StateTitle    State = iota // Title screen with scrolling banner.
-	StatePlaying               // Active gameplay.
-	StateDying                 // Death animation in progress.
-	StateGameOver              // Game over sequence.
-	StateDemo                  // Demo mode (auto-cycling caverns).
-	StateNextCavern            // Cavern transition animation.
+	StateTitle      State = iota // Title screen with scrolling banner.
+	StatePlaying                  // Active gameplay.
+	StateDying                    // Death animation in progress.
+	StateGameOver                 // Game over sequence.
+	StateDemo                     // Demo mode (auto-cycling caverns).
+	StateNextCavern               // Cavern transition animation.
+	StateSettings                 // Settings menu.
+	StateHighScores               // High score table.
+	StateNameEntry                // Name entry for new high score.
 )
 
 // GameEnv is the headless game environment.
@@ -70,6 +73,14 @@ type GameEnv struct {
 	// Music state.
 	MusicNoteIndex int
 	MusicEnabled   bool
+
+	// Feature flags (set from config, checked during gameplay).
+	InfiniteLives   bool
+	InfiniteAir     bool
+	HarmlessHeights bool
+	NoNasties       bool
+	NoGuardians     bool
+	WarpMode        bool
 
 	// Demo mode.
 	DemoCounter int
@@ -227,9 +238,17 @@ func (e *GameEnv) GetObservation() Observation {
 func (e *GameEnv) stepTitle(act action.Action) {
 	e.TitleFrame++
 
-	// Enter/fire starts the game (passed via act.Enter).
+	// Enter starts the game. Escape goes to settings. Up goes to high scores.
 	if act.Enter {
 		e.startGame()
+		return
+	}
+	if act.Escape {
+		e.State = StateSettings
+		return
+	}
+	if act.Up {
+		e.State = StateHighScores
 		return
 	}
 
@@ -485,7 +504,9 @@ func (e *GameEnv) stepDying() {
 	// Original death animation takes ~0.12 seconds (8 iterations of colour
 	// flash + short sound). At 16 FPS, 0.12s ≈ 2 frames. Use 2 frames.
 	if e.AnimCounter >= 2 {
-		if e.Lives > 0 {
+		if e.InfiniteLives {
+			e.Reset(e.CavernNumber) // Don't decrement lives.
+		} else if e.Lives > 0 {
 			e.Lives--
 			e.Reset(e.CavernNumber)
 		} else {
@@ -657,6 +678,9 @@ func rotateLeft(b byte, n uint) byte  { return (b << n) | (b >> (8 - n)) }
 func rotateRight(b byte, n uint) byte { return (b >> n) | (b << (8 - n)) }
 
 func (e *GameEnv) decreaseAir() {
+	if e.InfiniteAir {
+		return // Air never decreases.
+	}
 	e.GameClock -= 4
 	if e.GameClock == 0xFC {
 		if e.Air <= 0x24 {

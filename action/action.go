@@ -5,8 +5,11 @@ package action
 
 // Action represents a single frame's player input.
 type Action struct {
-	Left  bool
-	Right bool
-	Jump  bool
-	Enter bool // Start game / fire button.
+	Left   bool
+	Right  bool
+	Jump   bool
+	Enter  bool // Start game / confirm selection.
+	Up     bool // Menu navigation.
+	Down   bool // Menu navigation.
+	Escape bool // Back / return to previous screen.
 }
