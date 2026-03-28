@@ -24,6 +24,7 @@ const (
 	StateSettings                 // Settings menu.
 	StateHighScores               // High score table.
 	StateNameEntry                // Name entry for new high score.
+	StateWarp                     // Warp cavern selection screen.
 )
 
 // GameEnv is the headless game environment.

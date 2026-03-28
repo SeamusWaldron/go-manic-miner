@@ -38,6 +38,7 @@ type Game struct {
 	settingsScreen *SettingsScreen
 	highScoreScr   *HighScoreScreen
 	nameEntryScr   *NameEntryScreen
+	warpScreen     *WarpScreen
 }
 
 // New creates a new Game instance for human play.
@@ -126,6 +127,22 @@ func (g *Game) logicTick() {
 			g.highScoreScr = newHighScoreScreen()
 		}
 		return
+
+	case engine.StateWarp:
+		if g.warpScreen == nil {
+			g.warpScreen = newWarpScreen()
+		}
+		result := g.warpScreen.update()
+		if result == -2 {
+			// Escape — back to game.
+			g.warpScreen = nil
+			g.env.State = engine.StatePlaying
+		} else if result >= 0 {
+			// Warp to selected cavern.
+			g.warpScreen = nil
+			g.lastObs = g.env.Reset(result)
+		}
+		return
 	}
 
 	// Pause handling.
@@ -177,12 +194,14 @@ func (g *Game) logicTick() {
 
 	// Cheat code.
 	g.cheat.Update()
+
+	// Warp screen: press 6 during gameplay when warp mode or cheat active.
 	if g.env.State == engine.StatePlaying {
-		if g.env.WarpMode || g.cheat.Active {
-			if dest := g.cheat.CheckTeleport(); dest >= 0 {
-				g.lastObs = g.env.Reset(dest)
-				return
-			}
+		if (g.env.WarpMode || g.cheat.Active) && ebiten.IsKeyPressed(ebiten.KeyDigit6) {
+			g.env.State = engine.StateWarp
+			g.warpScreen = newWarpScreen()
+			g.warpScreen.cursor = g.env.CavernNumber // Start on current cavern.
+			return
 		}
 	}
 
@@ -307,6 +326,10 @@ func (g *Game) Draw(scr *ebiten.Image) {
 	case engine.StateNameEntry:
 		if g.nameEntryScr != nil {
 			g.nameEntryScr.draw(g.display, g.frameCount)
+		}
+	case engine.StateWarp:
+		if g.warpScreen != nil {
+			g.warpScreen.draw(g.display, g.frameCount)
 		}
 	}
 
