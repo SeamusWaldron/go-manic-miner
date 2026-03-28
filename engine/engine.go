@@ -529,8 +529,6 @@ func (e *GameEnv) stepGameOver() {
 	case 0:
 		// Boot descent. Original: distance increments by 4 each step until 196.
 		if e.GameOverBootY < 196 {
-			// Draw boot at current Y position, cellX=15.
-			// Boot is drawn WITHOUT erasing previous position (extends trouser leg).
 			bootPixelY := e.GameOverBootY / 2
 			if bootPixelY >= 0 && bootPixelY < 112 {
 				screen.DrawSprite(e.WorkPixels[:], bootPixelY, 15, data.BootGraphic[:], screen.DrawOverwrite)
@@ -542,6 +540,14 @@ func (e *GameEnv) stepGameOver() {
 				e.WorkAttr[i] = attr
 			}
 
+			// Sound: rising pitch as boot descends.
+			// Original: E = 255 - distance, C = 64. Pitch rises as distance increases.
+			e.SoundRequest = 5 // Game over boot sound.
+			e.SoundPitch = 255 - e.GameOverBootY
+			if e.SoundPitch < 4 {
+				e.SoundPitch = 4
+			}
+
 			e.GameOverBootY += 4
 		} else {
 			e.GameOverPhase = 1
@@ -549,48 +555,33 @@ func (e *GameEnv) stepGameOver() {
 		}
 
 	case 1:
-		// "Game Over" text appears. Brief pause then start glistening.
-		// Set a neutral attribute for the whole screen.
-		for i := range e.WorkAttr {
-			e.WorkAttr[i] = 0x47 // INK 7, PAPER 0, BRIGHT 1.
-		}
-		if e.AnimCounter >= 4 {
-			e.GameOverPhase = 2
-			e.AnimCounter = 0
-			e.GameOverGlisten = 0
-		}
-
-	case 2:
-		// Glistening "Game Over" text. Original: 6 outer loops * 256 inner loops.
-		// We approximate: 96 frames (~6 seconds at 16 FPS).
+		// "Game Over" text + glistening. Original: 6 * 256 delay loops ≈ 1.5s.
+		// At 16 FPS: 1.5s ≈ 24 frames.
 		for i := range e.WorkAttr {
 			e.WorkAttr[i] = 0x47
 		}
 
 		// Cycle INK colours for each letter of "Game Over".
-		// Letters at attribute positions: (6,10)-(6,13) and (6,18)-(6,21).
-		baseColour := byte(e.GameOverGlisten)
-		gamePos := []int{6*32 + 10, 6*32 + 11, 6*32 + 12, 6*32 + 13}
-		overPos := []int{6*32 + 18, 6*32 + 19, 6*32 + 20, 6*32 + 21}
-		for i, pos := range append(gamePos, overPos...) {
+		baseColour := byte(e.AnimCounter)
+		positions := []int{
+			6*32 + 10, 6*32 + 11, 6*32 + 12, 6*32 + 13, // "Game"
+			6*32 + 18, 6*32 + 19, 6*32 + 20, 6*32 + 21, // "Over"
+		}
+		for i, pos := range positions {
 			ink := (baseColour + byte(i)) & 0x07
 			if pos < len(e.WorkAttr) {
-				e.WorkAttr[pos] = 0x40 | ink // BRIGHT 1 + cycling INK.
+				e.WorkAttr[pos] = 0x40 | ink
 			}
 		}
-		e.GameOverGlisten++
 
-		if e.AnimCounter >= 96 {
-			e.GameOverPhase = 3
+		if e.AnimCounter >= 24 {
+			// Immediately return to title. Original: JP Start.
+			e.Lives = 2
+			for i := range e.Score {
+				e.Score[i] = '0'
+			}
+			e.initTitle()
 		}
-
-	case 3:
-		// Return to title screen.
-		e.Lives = 2
-		for i := range e.Score {
-			e.Score[i] = '0'
-		}
-		e.initTitle()
 	}
 }
 

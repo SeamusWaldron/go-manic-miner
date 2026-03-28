@@ -152,13 +152,16 @@ func (g *Game) updateAudio() {
 		}
 
 	case engine.StatePlaying:
-		// Stop the title tune if it was still playing.
+		// Stop the title tune once on transition.
 		if g.audioPlayer.IsTunePlaying() {
 			g.audioPlayer.Silence()
 		}
-		// Start in-game music if not already playing.
+		// Start in-game music if enabled and not already playing.
 		if g.env.MusicEnabled && !g.audioPlayer.IsInGameMusicPlaying() {
 			g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
+		}
+		if !g.env.MusicEnabled && g.audioPlayer.IsInGameMusicPlaying() {
+			g.audioPlayer.StopInGameMusic()
 		}
 		// Sound effects: temporarily override the music output via burst.
 		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
@@ -166,14 +169,19 @@ func (g *Game) updateAudio() {
 		}
 
 	case engine.StateDying:
-		// Death sound: descending pitch buzz. Original MainLoop20-21 plays
-		// 8 iterations with D going from 7 to 63 (ascending pitch = descending buzz).
+		// Death sound.
 		g.audioPlayer.StopInGameMusic()
 		pitch := 7 + g.env.AnimCounter*8
 		if pitch > 63 {
 			pitch = 63
 		}
 		g.audioPlayer.PlaySFX(pitch)
+
+	case engine.StateGameOver:
+		// Boot descent sound (rising pitch) and silence during glistening.
+		if g.lastObs.SoundRequest == 5 {
+			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
+		}
 
 	default:
 		g.audioPlayer.Silence()
