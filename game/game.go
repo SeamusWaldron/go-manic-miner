@@ -48,7 +48,7 @@ func New() *Game {
 	// Apply feature flags from config.
 	applyFeatures(env, &cfg.Features)
 	env.BannerLength = len(extendedBanner) - 31
-	engine.ContinueCavern = cfg.LastCavern
+	env.ContinueCavern = cfg.LastCavern
 
 	g := &Game{
 		env:         env,
@@ -210,9 +210,10 @@ func (g *Game) logicTick() {
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 
-	// Track last cavern played.
+	// Track last cavern played (keep config and engine in sync).
 	if g.env.State == engine.StatePlaying {
 		g.cfg.LastCavern = g.env.CavernNumber
+		g.env.ContinueCavern = g.env.CavernNumber
 	}
 
 	// Detect transition from GameOver to Title — check for high score.

@@ -86,6 +86,9 @@ type GameEnv struct {
 	// Demo mode.
 	DemoCounter int
 
+	// Continue: last cavern played (set by game wrapper).
+	ContinueCavern int
+
 	// Game over sequence state.
 	GameOverPhase   int
 	GameOverBootY   int
@@ -336,8 +339,6 @@ func (e *GameEnv) stepTitleBanner() {
 	}
 }
 
-// ContinueCavern is set by the game wrapper from config.LastCavern.
-var ContinueCavern int
 
 func (e *GameEnv) startGame() {
 	e.Lives = 2
@@ -355,7 +356,7 @@ func (e *GameEnv) startContinue() {
 	for i := range e.Score {
 		e.Score[i] = '0'
 	}
-	cavern := ContinueCavern
+	cavern := e.ContinueCavern
 	if cavern < 0 || cavern >= NumCaverns {
 		cavern = 0
 	}
