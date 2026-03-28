@@ -4,7 +4,11 @@ package game
 
 import (
 	"fmt"
+	"image"
 	"image/color"
+	"image/png"
+	"os"
+	"time"
 
 	"manicminer/audio"
 	"manicminer/config"
@@ -39,7 +43,8 @@ type Game struct {
 	highScoreScr    *HighScoreScreen
 	nameEntryScr    *NameEntryScreen
 	warpScreen      *WarpScreen
-	escExitPending  bool // True when ESC exit needs game over animation after name entry.
+	escExitPending  bool
+	screenshotHeld  bool
 }
 
 // New creates a new Game instance for human play.
@@ -340,6 +345,36 @@ func (g *Game) Draw(scr *ebiten.Image) {
 	}
 
 	scr.DrawImage(g.display, &ebiten.DrawImageOptions{})
+
+	// Screenshot: press Shift+8 (*) to save a PNG.
+	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight)
+	if shift && ebiten.IsKeyPressed(ebiten.KeyDigit8) {
+		if !g.screenshotHeld {
+			g.screenshotHeld = true
+			g.saveScreenshot(scr)
+		}
+	} else {
+		g.screenshotHeld = false
+	}
+}
+
+func (g *Game) saveScreenshot(scr *ebiten.Image) {
+	bounds := scr.Bounds()
+	img := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			img.Set(x, y, scr.At(x, y))
+		}
+	}
+	filename := fmt.Sprintf("screenshot_%s.png", time.Now().Format("20060102_150405"))
+	f, err := os.Create(filename)
+	if err != nil {
+		fmt.Printf("Screenshot error: %v\n", err)
+		return
+	}
+	defer f.Close()
+	png.Encode(f, img)
+	fmt.Printf("Screenshot saved: %s\n", filename)
 }
 
 // Extended banner text: original + our additions.
