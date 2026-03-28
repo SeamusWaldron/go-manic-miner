@@ -21,3 +21,9 @@ Thumbs.db
 
 # Temporary extraction scripts
 extract_caverns.py
+
+# Reference assembly (not part of the Go project)
+*.asm
+
+# Screenshots
+screenshot_*.png
