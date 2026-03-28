@@ -309,6 +309,7 @@ func (e *GameEnv) stepTitleBanner() {
 
 func (e *GameEnv) startGame() {
 	e.Lives = 2
+	e.MusicEnabled = true
 	for i := range e.Score {
 		e.Score[i] = '0'
 	}
@@ -550,6 +551,7 @@ func (e *GameEnv) stepGameOver() {
 
 			e.GameOverBootY += 4
 		} else {
+			e.SoundRequest = 0 // Stop boot sound.
 			e.GameOverPhase = 1
 			e.AnimCounter = 0
 		}

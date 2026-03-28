@@ -157,11 +157,14 @@ func (g *Game) updateAudio() {
 			g.audioPlayer.Silence()
 		}
 		// Start in-game music if enabled and not already playing.
-		if g.env.MusicEnabled && !g.audioPlayer.IsInGameMusicPlaying() {
-			g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
-		}
-		if !g.env.MusicEnabled && g.audioPlayer.IsInGameMusicPlaying() {
-			g.audioPlayer.StopInGameMusic()
+		if g.env.MusicEnabled {
+			if !g.audioPlayer.IsInGameMusicPlaying() {
+								g.audioPlayer.StartInGameMusic(data.InGameTuneData[:], g.musicStep)
+			}
+		} else {
+			if g.audioPlayer.IsInGameMusicPlaying() {
+				g.audioPlayer.StopInGameMusic()
+			}
 		}
 		// Sound effects: temporarily override the music output via burst.
 		if g.lastObs.SoundRequest == 1 || g.lastObs.SoundRequest == 2 {
