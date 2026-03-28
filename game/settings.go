@@ -189,7 +189,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 		{"Warp Mode", cfg.Features.WarpMode, settingsItemWarp},
 	}
 	for _, t := range toggles {
-		row := 11 + (t.item - settingsItemInfLives)
+		row := 10 + (t.item - settingsItemInfLives)
 		// Cursor.
 		if s.cursor == t.item {
 			screen.PrintMessage(display, 1*8, row*8, cursorChar, yellow)

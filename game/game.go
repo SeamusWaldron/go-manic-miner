@@ -141,6 +141,12 @@ func (g *Game) logicTick() {
 			g.lastObs = g.env.Reset(g.env.CavernNumber)
 			return
 		}
+		// Escape exits to title screen.
+		if ebiten.IsKeyPressed(ebiten.KeyEscape) {
+			g.audioPlayer.Silence()
+			g.env.InitTitle()
+			return
+		}
 	}
 
 	// Music toggle.
@@ -308,6 +314,8 @@ func (g *Game) drawTitle() {
 }
 
 func (g *Game) drawPlaying() {
+	// Clear the entire display first to remove any remnants from other screens.
+	g.display.Fill(color.Black)
 	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
 	g.renderHUD()
 }
