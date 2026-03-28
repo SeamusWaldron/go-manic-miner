@@ -214,7 +214,7 @@ func (e *GameEnv) Step(act action.Action) StepResult {
 	case StateNextCavern:
 		e.stepNextCavern()
 	case StateDemo:
-		e.stepDemo()
+		e.stepDemo(act)
 	}
 
 	obs := e.buildObservation()
@@ -633,14 +633,19 @@ func (e *GameEnv) stepNextCavern() {
 }
 
 // stepDemo handles demo mode (auto-cycling caverns with no player control).
-func (e *GameEnv) stepDemo() {
+func (e *GameEnv) stepDemo(act action.Action) {
+	// Original: any key press during demo returns to title screen (JP Start).
+	if act.Left || act.Right || act.Jump || act.Enter || act.Escape || act.Up || act.Down {
+		e.InitTitle()
+		return
+	}
+
 	if e.CurrentCavern == nil || e.Willy == nil {
 		return
 	}
 
 	e.DemoCounter--
 	if e.DemoCounter <= 0 {
-		// Move to next cavern in demo.
 		next := (e.CavernNumber + 1) % NumCaverns
 		e.Reset(next)
 		e.State = StateDemo
@@ -648,9 +653,9 @@ func (e *GameEnv) stepDemo() {
 		return
 	}
 
-	// Run the game logic but with no input (Willy stands still).
+	// Run game logic with no input (Willy stands still).
 	e.stepPlaying(action.Action{})
-	e.State = StateDemo // Ensure we stay in demo state.
+	e.State = StateDemo
 }
 
 func (e *GameEnv) moveConveyor() {
