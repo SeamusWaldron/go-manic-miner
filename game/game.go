@@ -43,6 +43,7 @@ type Game struct {
 	highScoreScr    *HighScoreScreen
 	nameEntryScr    *NameEntryScreen
 	warpScreen      *WarpScreen
+	helpScreen      *HelpScreen
 	escExitPending  bool
 	screenshotHeld  bool
 }
@@ -145,13 +146,22 @@ func (g *Game) logicTick() {
 		}
 		result := g.warpScreen.update()
 		if result == -2 {
-			// Escape — back to game.
 			g.warpScreen = nil
 			g.env.State = engine.StatePlaying
 		} else if result >= 0 {
-			// Warp to selected cavern.
 			g.warpScreen = nil
 			g.lastObs = g.env.Reset(result)
+		}
+		return
+
+	case engine.StateHelp:
+		if g.helpScreen == nil {
+			g.helpScreen = newHelpScreen()
+		}
+		if g.helpScreen.update() {
+			g.helpScreen = nil
+			g.env.InitTitle()
+			g.env.BannerLength = len(extendedBanner) - 31
 		}
 		return
 	}
@@ -236,6 +246,16 @@ func (g *Game) logicTick() {
 	}
 
 	// Check if game over should transition to name entry.
+	// ? key (Shift+/) opens help from title screen.
+	if g.env.State == engine.StateTitle {
+		shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight)
+		if shift && ebiten.IsKeyPressed(ebiten.KeySlash) {
+			g.env.State = engine.StateHelp
+			g.helpScreen = newHelpScreen()
+			return
+		}
+	}
+
 	prevState := g.env.State
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
@@ -342,6 +362,10 @@ func (g *Game) Draw(scr *ebiten.Image) {
 		if g.warpScreen != nil {
 			g.warpScreen.draw(g.display, g.frameCount)
 		}
+	case engine.StateHelp:
+		if g.helpScreen != nil {
+			g.helpScreen.draw(g.display, g.frameCount)
+		}
 	}
 
 	scr.DrawImage(g.display, &ebiten.DrawImageOptions{})
@@ -384,7 +408,7 @@ func init() {
 	// Copy the original banner and append control instructions.
 	extendedBanner = make([]byte, 0, 512)
 	extendedBanner = append(extendedBanner, data.TitleScreenBanner[:]...)
-	extra := " . . ENTER to Start . . DOWN to Continue . . ESC for Settings . . UP for High Scores .  .  .  .  .  .  .  ."
+	extra := " . . ENTER to Start . . DOWN to Continue . . ESC for Settings . . UP for High Scores . . ? for Help .  .  .  .  .  .  .  ."
 	extendedBanner = append(extendedBanner, []byte(extra)...)
 }
 
