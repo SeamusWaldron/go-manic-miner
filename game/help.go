@@ -83,9 +83,26 @@ var helpLines = []HelpLine{
 	{"  when you qualify.", helpWhite},
 	{"", 0},
 	{"", 0},
-	{"  Based on the ZX Spectrum", helpCyan},
-	{"  game by Matthew Smith", helpCyan},
-	{"  (C) 1983 Bug-Byte Ltd.", helpCyan},
+	{"  ACKNOWLEDGEMENTS", helpYellow},
+	{"", 0},
+	{"  Original game by", helpWhite},
+	{"  Matthew Smith", helpCyan},
+	{"  (C) 1983 Bug-Byte Ltd.", helpWhite},
+	{"", 0},
+	{"  Based on the Bug-Byte", helpWhite},
+	{"  version of Manic Miner", helpWhite},
+	{"  for the ZX Spectrum.", helpWhite},
+	{"", 0},
+	{"  Z80 disassembly by", helpWhite},
+	{"  William Humphreys", helpCyan},
+	{"  with Simon Brattel.", helpWhite},
+	{"  github.com/WHumphreys/", helpGreen},
+	{"  Manic-Miner-Source-Code", helpGreen},
+	{"", 0},
+	{"  Go implementation by", helpWhite},
+	{"  Seamus Waldron", helpCyan},
+	{"  with Claude AI.", helpWhite},
+	{"", 0},
 	{"", 0},
 	{"", 0},
 }
@@ -146,8 +163,8 @@ func (h *HelpScreen) draw(display *ebiten.Image, frameCount int) {
 	// Fixed header.
 	screen.PrintMessage(display, 5*8, 0, "MANIC MINER HELP", helpCyan)
 
-	// Scrolling content area: y=12 to y=172 (20 rows of 8 pixels).
-	contentTop := 12
+	// Scrolling content area: y=16 to y=172 (starts below header row).
+	contentTop := 16
 	contentBottom := 172
 
 	for i, line := range helpLines {
