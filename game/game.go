@@ -35,10 +35,11 @@ type Game struct {
 	musicToggleHeld bool
 
 	// Sub-screens.
-	settingsScreen *SettingsScreen
-	highScoreScr   *HighScoreScreen
-	nameEntryScr   *NameEntryScreen
-	warpScreen     *WarpScreen
+	settingsScreen  *SettingsScreen
+	highScoreScr    *HighScoreScreen
+	nameEntryScr    *NameEntryScreen
+	warpScreen      *WarpScreen
+	escExitPending  bool // True when ESC exit needs game over animation after name entry.
 }
 
 // New creates a new Game instance for human play.
@@ -123,8 +124,13 @@ func (g *Game) logicTick() {
 			g.cfg.PlayerName = name
 			g.cfg.Save()
 			g.nameEntryScr = nil
-			g.env.State = engine.StateHighScores
-			g.highScoreScr = newHighScoreScreen()
+			if g.escExitPending {
+				g.escExitPending = false
+				g.env.InitGameOver()
+			} else {
+				g.env.State = engine.StateHighScores
+				g.highScoreScr = newHighScoreScreen()
+			}
 		}
 		return
 
@@ -168,13 +174,13 @@ func (g *Game) logicTick() {
 			g.cfg.LastCavern = g.env.CavernNumber
 			score := g.env.ScoreInt()
 			if g.cfg.QualifiesForHighScore(score) {
+				g.escExitPending = true
 				g.env.State = engine.StateNameEntry
 				g.nameEntryScr = newNameEntryScreen(score, g.env.CavernNumber, g.cfg.PlayerName)
 				return
 			}
 			g.cfg.Save()
-			g.env.InitTitle()
-			g.env.BannerLength = len(extendedBanner) - 31
+			g.env.InitGameOver()
 			return
 		}
 	}

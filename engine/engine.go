@@ -539,13 +539,13 @@ func (e *GameEnv) stepDying() {
 			e.Lives--
 			e.Reset(e.CavernNumber)
 		} else {
-			e.initGameOver()
+			e.InitGameOver()
 		}
 	}
 }
 
-// initGameOver sets up the game over sequence state.
-func (e *GameEnv) initGameOver() {
+// InitGameOver sets up the game over sequence state.
+func (e *GameEnv) InitGameOver() {
 	// Update high score.
 	currentScore := string(e.Score[4:])
 	highScore := string(e.HighScore[:])
