@@ -60,6 +60,7 @@ type GameEnv struct {
 
 	// Title screen state.
 	BannerOffset    int  // Scroll position for title banner.
+	BannerLength    int  // Total banner length (set by wrapper for extended text).
 	TitleFrame      int  // Frame counter for title screen.
 	TitlePhase      int  // 0 = tune/piano, 1 = banner scroll.
 	TuneNoteIndex   int  // Current note in the title tune.
@@ -317,7 +318,11 @@ func (e *GameEnv) stepTitleBanner() {
 
 	// Advance banner every frame (original pauses ~0.1s per character).
 	e.BannerOffset++
-	if e.BannerOffset >= 224 {
+	limit := e.BannerLength
+	if limit <= 0 {
+		limit = 224
+	}
+	if e.BannerOffset >= limit {
 		// Banner finished — enter demo mode.
 		e.State = StateDemo
 		e.DemoCounter = 64

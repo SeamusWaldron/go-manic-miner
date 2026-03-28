@@ -47,6 +47,7 @@ func New() *Game {
 
 	// Apply feature flags from config.
 	applyFeatures(env, &cfg.Features)
+	env.BannerLength = len(extendedBanner) - 31 // Scroll until last 32 chars visible.
 
 	g := &Game{
 		env:         env,
@@ -93,7 +94,8 @@ func (g *Game) logicTick() {
 			g.cfg.Save()
 			applyFeatures(g.env, &g.cfg.Features)
 			g.settingsScreen = nil
-			g.env.InitTitle() // Full screen refresh.
+			g.env.InitTitle()
+			g.env.BannerLength = len(extendedBanner) - 31
 		}
 		return
 
@@ -103,7 +105,8 @@ func (g *Game) logicTick() {
 		}
 		if g.highScoreScr.update() {
 			g.highScoreScr = nil
-			g.env.InitTitle() // Full screen refresh.
+			g.env.InitTitle()
+			g.env.BannerLength = len(extendedBanner) - 31
 		}
 		return
 
@@ -292,6 +295,17 @@ func (g *Game) Draw(scr *ebiten.Image) {
 	scr.DrawImage(g.display, &ebiten.DrawImageOptions{})
 }
 
+// Extended banner text: original + our additions.
+var extendedBanner []byte
+
+func init() {
+	// Copy the original banner and append control instructions.
+	extendedBanner = make([]byte, 0, 512)
+	extendedBanner = append(extendedBanner, data.TitleScreenBanner[:]...)
+	extra := " . . ENTER to Start . . ESC for Settings . . UP for High Scores .  .  .  .  .  .  .  ."
+	extendedBanner = append(extendedBanner, []byte(extra)...)
+}
+
 func (g *Game) drawTitle() {
 	g.display.Fill(color.Black)
 	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
@@ -301,17 +315,14 @@ func (g *Game) drawTitle() {
 		var bannerText [32]byte
 		for i := 0; i < 32; i++ {
 			idx := bannerStart + i
-			if idx >= 0 && idx < len(data.TitleScreenBanner) {
-				bannerText[i] = data.TitleScreenBanner[idx]
+			if idx >= 0 && idx < len(extendedBanner) {
+				bannerText[i] = extendedBanner[idx]
 			} else {
 				bannerText[i] = ' '
 			}
 		}
-		screen.PrintMessage(g.display, 0, 152, string(bannerText[:]), 0)
+		screen.PrintMessage(g.display, 0, 152, string(bannerText[:]), 0x07)
 	}
-
-	// Help text at bottom.
-	screen.PrintMessage(g.display, 0, 184, "ENTER Start  ESC Settings", 0x06)
 }
 
 func (g *Game) drawPlaying() {
