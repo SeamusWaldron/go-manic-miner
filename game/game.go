@@ -293,6 +293,7 @@ func (g *Game) Draw(scr *ebiten.Image) {
 }
 
 func (g *Game) drawTitle() {
+	g.display.Fill(color.Black)
 	g.renderer.RenderBuffer(g.display, g.lastObs.Attrs[:], g.lastObs.Pixels[:])
 
 	if g.env.TitlePhase == 1 {
