@@ -145,7 +145,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 		cursorChar = " "
 	}
 
-	screen.PrintMessage(display, 3*8, 1*8, "MANIC MINER SETTINGS", cyan)
+	screen.PrintMessage(display, 2*8, 1*8, "MANIC MINER SETTINGS", cyan)
 
 	// Controls section.
 	screen.PrintMessage(display, 2*8, 3*8, "CONTROLS", yellow)
@@ -226,7 +226,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 	}
 
 	// Help text.
-	screen.PrintMessage(display, 0, 21*8, "UP/DOWN Navigate", yellow)
-	screen.PrintMessage(display, 0, 22*8, "ENTER  Select/Toggle", yellow)
-	screen.PrintMessage(display, 0, 23*8, "ESC    Back to title", yellow)
+	screen.PrintMessage(display, 2*8, 21*8, "UP/DOWN Navigate", yellow)
+	screen.PrintMessage(display, 2*8, 22*8, "ENTER  Select/Toggle", yellow)
+	screen.PrintMessage(display, 2*8, 23*8, "ESC    Back to title", yellow)
 }
