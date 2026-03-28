@@ -127,17 +127,25 @@ func (s *SettingsScreen) update(cfg *config.Config) bool {
 func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCount int) {
 	display.Fill(color.Black)
 
-	white := byte(0x47)      // INK 7, BRIGHT 1.
-	yellow := byte(0x46)     // INK 6, BRIGHT 1.
-	cyan := byte(0x45)       // INK 5, BRIGHT 1.
-	green := byte(0x44)      // INK 4, BRIGHT 1.
-	red := byte(0x42)        // INK 2, BRIGHT 1.
+	yellow := byte(0x46)  // INK 6, BRIGHT 1.
+	cyan := byte(0x45)    // INK 5, BRIGHT 1.
+	green := byte(0x44)   // INK 4, BRIGHT 1.
+	red := byte(0x42)     // INK 2, BRIGHT 1.
+	white := byte(0x47)   // INK 7, BRIGHT 1.
+	dim := byte(0x07)     // INK 7, normal brightness.
 
-	flash := func(attr byte, selected bool) byte {
-		if selected && frameCount/8%2 == 0 {
-			return attr | 0x80
+	// Selected item gets bright white, unselected gets dim.
+	itemAttr := func(item int) byte {
+		if s.cursor == item {
+			return white
 		}
-		return attr
+		return dim
+	}
+
+	// Draw blinking cursor `>` next to selected item.
+	cursorChar := ">"
+	if frameCount/6%2 == 0 {
+		cursorChar = " "
 	}
 
 	screen.PrintMessage(display, 3*8, 1*8, "MANIC MINER SETTINGS", cyan)
@@ -148,19 +156,24 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 	schemes := []struct {
 		label  string
 		scheme config.ControlScheme
+		item   int
 	}{
-		{"Original (QWERT/POIUY)", config.ControlOriginal},
-		{"Arrows + Space", config.ControlArrows},
-		{"O/P + Space", config.ControlOP},
+		{"Original (QWERT/POIUY)", config.ControlOriginal, settingsItemControls0},
+		{"Arrows + Space", config.ControlArrows, settingsItemControls1},
+		{"O/P + Space", config.ControlOP, settingsItemControls2},
 	}
-	for i, sc := range schemes {
-		row := 5 + i
-		prefix := "  "
+	for _, sc := range schemes {
+		row := 5 + sc.item
+		active := " "
 		if cfg.ControlScheme == sc.scheme {
-			prefix = "> "
+			active = "*"
 		}
-		attr := flash(white, s.cursor == i)
-		screen.PrintMessage(display, 2*8, row*8, prefix+sc.label, attr)
+		// Cursor.
+		if s.cursor == sc.item {
+			screen.PrintMessage(display, 1*8, row*8, cursorChar, yellow)
+		}
+		screen.PrintMessage(display, 2*8, row*8, "("+active+")", itemAttr(sc.item))
+		screen.PrintMessage(display, 6*8, row*8, sc.label, itemAttr(sc.item))
 	}
 
 	// Cheats section.
@@ -178,22 +191,26 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 		{"No Guardians", cfg.Features.NoGuardians, settingsItemNoGuards},
 		{"Warp Mode", cfg.Features.WarpMode, settingsItemWarp},
 	}
-	for i, t := range toggles {
-		row := 11 + i
-		status := "[ ]"
-		statusAttr := red
-		if t.on {
-			status = "[*]"
-			statusAttr = green
+	for _, t := range toggles {
+		row := 11 + (t.item - settingsItemInfLives)
+		// Cursor.
+		if s.cursor == t.item {
+			screen.PrintMessage(display, 1*8, row*8, cursorChar, yellow)
 		}
-		attr := flash(white, s.cursor == t.item)
-		screen.PrintMessage(display, 4*8, row*8, t.label, attr)
-		screen.PrintMessage(display, 24*8, row*8, status, statusAttr)
+		screen.PrintMessage(display, 2*8, row*8, t.label, itemAttr(t.item))
+		if t.on {
+			screen.PrintMessage(display, 22*8, row*8, "[ON ]", green)
+		} else {
+			screen.PrintMessage(display, 22*8, row*8, "[OFF]", red)
+		}
 	}
 
 	// Player name.
-	nameAttr := flash(cyan, s.cursor == settingsItemName)
-	screen.PrintMessage(display, 2*8, 18*8, "PLAYER NAME:", nameAttr)
+	row := 18
+	if s.cursor == settingsItemName {
+		screen.PrintMessage(display, 1*8, row*8, cursorChar, yellow)
+	}
+	screen.PrintMessage(display, 2*8, row*8, "PLAYER NAME:", itemAttr(settingsItemName))
 	name := cfg.PlayerName
 	for len(name) < 3 {
 		name += "A"
@@ -201,12 +218,18 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 	for i := 0; i < 3; i++ {
 		charAttr := cyan
 		if s.editingName && s.nameCursor == i {
-			charAttr = white | 0x80 // Flash the active character.
+			// Blinking cursor on active character.
+			if frameCount/4%2 == 0 {
+				charAttr = white
+			} else {
+				charAttr = red
+			}
 		}
-		screen.PrintMessage(display, (16+i*2)*8, 18*8, string(name[i]), charAttr)
+		screen.PrintMessage(display, (16+i*2)*8, row*8, string(name[i]), charAttr)
 	}
 
 	// Help text.
-	screen.PrintMessage(display, 1*8, 22*8, "UP/DOWN Move  ENTER Toggle", yellow)
-	screen.PrintMessage(display, 1*8, 23*8, "ESC Back", yellow)
+	screen.PrintMessage(display, 0, 21*8, "UP/DOWN Navigate", yellow)
+	screen.PrintMessage(display, 0, 22*8, "ENTER  Select/Toggle", yellow)
+	screen.PrintMessage(display, 0, 23*8, "ESC    Back to title", yellow)
 }
