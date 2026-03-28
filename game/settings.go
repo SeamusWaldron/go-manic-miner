@@ -32,7 +32,7 @@ const (
 )
 
 func newSettingsScreen() *SettingsScreen {
-	return &SettingsScreen{}
+	return &SettingsScreen{debounce: 16} // Initial debounce to ignore key from title transition.
 }
 
 func (s *SettingsScreen) update(cfg *config.Config) bool {
@@ -42,18 +42,21 @@ func (s *SettingsScreen) update(cfg *config.Config) bool {
 	}
 
 	// Escape returns to title.
-	if ebiten.IsKeyPressed(ebiten.KeyEscape) {
+	if ebiten.IsKeyPressed(ebiten.KeyEscape) || ebiten.IsKeyPressed(ebiten.KeyBackspace) {
 		s.debounce = 8
-		return true // Signal to exit settings.
+		return true
 	}
 
-	// Navigation.
-	if ebiten.IsKeyPressed(ebiten.KeyArrowUp) && s.cursor > 0 {
+	// Navigation — support both arrow keys and common alternatives.
+	up := ebiten.IsKeyPressed(ebiten.KeyArrowUp) || ebiten.IsKeyPressed(ebiten.KeyK)
+	down := ebiten.IsKeyPressed(ebiten.KeyArrowDown) || ebiten.IsKeyPressed(ebiten.KeyJ)
+
+	if up && s.cursor > 0 {
 		s.cursor--
 		s.editingName = false
 		s.debounce = 6
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyArrowDown) && s.cursor < settingsItemCount-1 {
+	if down && s.cursor < settingsItemCount-1 {
 		s.cursor++
 		s.editingName = false
 		s.debounce = 6
@@ -89,11 +92,11 @@ func (s *SettingsScreen) update(cfg *config.Config) bool {
 
 	// Name editing.
 	if s.editingName && s.cursor == settingsItemName {
-		if ebiten.IsKeyPressed(ebiten.KeyArrowLeft) && s.nameCursor > 0 {
+		if (ebiten.IsKeyPressed(ebiten.KeyArrowLeft) || ebiten.IsKeyPressed(ebiten.KeyH)) && s.nameCursor > 0 {
 			s.nameCursor--
 			s.debounce = 6
 		}
-		if ebiten.IsKeyPressed(ebiten.KeyArrowRight) && s.nameCursor < 2 {
+		if (ebiten.IsKeyPressed(ebiten.KeyArrowRight) || ebiten.IsKeyPressed(ebiten.KeyL)) && s.nameCursor < 2 {
 			s.nameCursor++
 			s.debounce = 6
 		}
@@ -101,14 +104,14 @@ func (s *SettingsScreen) update(cfg *config.Config) bool {
 		for len(name) < 3 {
 			name = append(name, 'A')
 		}
-		if ebiten.IsKeyPressed(ebiten.KeyArrowUp) {
+		if up {
 			name[s.nameCursor]++
 			if name[s.nameCursor] > 'Z' {
 				name[s.nameCursor] = 'A'
 			}
 			s.debounce = 4
 		}
-		if ebiten.IsKeyPressed(ebiten.KeyArrowDown) {
+		if down {
 			name[s.nameCursor]--
 			if name[s.nameCursor] < 'A' {
 				name[s.nameCursor] = 'Z'
