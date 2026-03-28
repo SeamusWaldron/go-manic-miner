@@ -239,9 +239,14 @@ func (e *GameEnv) GetObservation() Observation {
 func (e *GameEnv) stepTitle(act action.Action) {
 	e.TitleFrame++
 
-	// Enter starts the game. Escape goes to settings. Up goes to high scores.
+	// Enter starts new game. Down continues from last cavern.
+	// Escape goes to settings. Up goes to high scores.
 	if act.Enter {
 		e.startGame()
+		return
+	}
+	if act.Down {
+		e.startContinue()
 		return
 	}
 	if act.Escape {
@@ -331,6 +336,9 @@ func (e *GameEnv) stepTitleBanner() {
 	}
 }
 
+// ContinueCavern is set by the game wrapper from config.LastCavern.
+var ContinueCavern int
+
 func (e *GameEnv) startGame() {
 	e.Lives = 2
 	e.MusicEnabled = true
@@ -339,6 +347,20 @@ func (e *GameEnv) startGame() {
 	}
 	e.CavernNumber = 0
 	e.Reset(0)
+}
+
+func (e *GameEnv) startContinue() {
+	e.Lives = 2
+	e.MusicEnabled = true
+	for i := range e.Score {
+		e.Score[i] = '0'
+	}
+	cavern := ContinueCavern
+	if cavern < 0 || cavern >= NumCaverns {
+		cavern = 0
+	}
+	e.CavernNumber = cavern
+	e.Reset(cavern)
 }
 
 // stepPlaying handles one frame of active gameplay.
@@ -614,16 +636,22 @@ func (e *GameEnv) stepGameOver() {
 }
 
 // stepNextCavern handles the cavern transition animation.
+// Original: 63 iterations of colour cycling (~0.43s) then air-to-score conversion.
+// At 16 FPS, cycle through multiple attribute values per frame to match timing.
 func (e *GameEnv) stepNextCavern() {
 	e.AnimCounter++
 
-	// Colour cycling transition.
-	attr := byte(0x3F - (e.AnimCounter % 64))
+	// Cycle through ~9 attribute values per frame (63 values / 7 frames ≈ 0.43s).
+	baseAttr := 0x3F - (e.AnimCounter * 9)
+	if baseAttr < 1 {
+		baseAttr = 1
+	}
+	attr := byte(baseAttr)
 	for i := range e.WorkAttr {
 		e.WorkAttr[i] = attr
 	}
 
-	if e.AnimCounter >= 64 {
+	if e.AnimCounter >= 7 {
 		next := e.CavernNumber + 1
 		if next >= NumCaverns {
 			next = 0
@@ -756,6 +784,11 @@ func (e *GameEnv) computeReward() float64 {
 	}
 	reward -= 0.001
 	return reward
+}
+
+// ScoreInt returns the current score as an integer.
+func (e *GameEnv) ScoreInt() int {
+	return e.scoreToInt()
 }
 
 func (e *GameEnv) scoreToInt() int {

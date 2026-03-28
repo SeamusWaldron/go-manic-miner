@@ -47,7 +47,8 @@ func New() *Game {
 
 	// Apply feature flags from config.
 	applyFeatures(env, &cfg.Features)
-	env.BannerLength = len(extendedBanner) - 31 // Scroll until last 32 chars visible.
+	env.BannerLength = len(extendedBanner) - 31
+	engine.ContinueCavern = cfg.LastCavern
 
 	g := &Game{
 		env:         env,
@@ -144,10 +145,19 @@ func (g *Game) logicTick() {
 			g.lastObs = g.env.Reset(g.env.CavernNumber)
 			return
 		}
-		// Escape exits to title screen.
+		// Escape exits to title screen. Save progress and check high score.
 		if ebiten.IsKeyPressed(ebiten.KeyEscape) {
 			g.audioPlayer.Silence()
+			g.cfg.LastCavern = g.env.CavernNumber
+			score := g.env.ScoreInt()
+			if g.cfg.QualifiesForHighScore(score) {
+				g.env.State = engine.StateNameEntry
+				g.nameEntryScr = newNameEntryScreen(score, g.env.CavernNumber, g.cfg.PlayerName)
+				return
+			}
+			g.cfg.Save()
 			g.env.InitTitle()
+			g.env.BannerLength = len(extendedBanner) - 31
 			return
 		}
 	}
@@ -200,14 +210,21 @@ func (g *Game) logicTick() {
 	result := g.env.Step(inp.ToAction())
 	g.lastObs = result.Obs
 
+	// Track last cavern played.
+	if g.env.State == engine.StatePlaying {
+		g.cfg.LastCavern = g.env.CavernNumber
+	}
+
 	// Detect transition from GameOver to Title — check for high score.
 	if prevState == engine.StateGameOver && g.env.State == engine.StateTitle {
 		score := g.lastObs.ScoreInt
 		if g.cfg.QualifiesForHighScore(score) {
 			g.env.State = engine.StateNameEntry
 			g.nameEntryScr = newNameEntryScreen(score, g.env.CavernNumber, g.cfg.PlayerName)
+			g.cfg.Save()
 			return
 		}
+		g.cfg.Save()
 	}
 
 	g.updateAudio()
@@ -302,7 +319,7 @@ func init() {
 	// Copy the original banner and append control instructions.
 	extendedBanner = make([]byte, 0, 512)
 	extendedBanner = append(extendedBanner, data.TitleScreenBanner[:]...)
-	extra := " . . ENTER to Start . . ESC for Settings . . UP for High Scores .  .  .  .  .  .  .  ."
+	extra := " . . ENTER to Start . . DOWN to Continue . . ESC for Settings . . UP for High Scores .  .  .  .  .  .  .  ."
 	extendedBanner = append(extendedBanner, []byte(extra)...)
 }
 

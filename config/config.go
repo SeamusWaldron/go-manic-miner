@@ -40,6 +40,7 @@ type Config struct {
 	ControlScheme ControlScheme    `json:"controlScheme"`
 	HighScores    []HighScoreEntry `json:"highScores"`
 	Features      Features         `json:"features"`
+	LastCavern    int              `json:"lastCavern"` // For continue feature.
 }
 
 const maxHighScores = 10
