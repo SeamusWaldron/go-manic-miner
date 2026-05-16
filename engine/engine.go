@@ -28,6 +28,7 @@ const (
 	StateWarp                     // Warp cavern selection screen.
 	StateHelp                     // Help/instructions screen.
 	StateLoading                  // Faux ZX Spectrum loading screen (UI-only, handled in wrapper).
+	StateRecords                  // Combined high-score + speedrun records (UI-only).
 )
 
 // GameEnv is the headless game environment.
@@ -111,10 +112,54 @@ type GameEnv struct {
 	SoundPitch   int // Pitch parameter.
 
 
+	// Speedrun state. Active is set by the wrapper when the player
+	// initiates a speedrun. The engine uses these to (a) force a death
+	// to restart the current cavern in single mode, and (b) count
+	// ticks so the wrapper can display an in-game timer.
+	SpeedrunActive        bool
+	SpeedrunIsOverall     bool
+	SpeedrunCavern        int   // Target cavern for single-cavern mode.
+	SpeedrunPhase         int   // 0=countdown, 1=running, 2=finished.
+	SpeedrunRunTicks      int64 // Logic ticks accumulated while phase==1.
+	SpeedrunFinalCs       int64 // Frozen final time when phase reaches 2.
+	SpeedrunCountdownLeft int   // Ticks remaining in the pre-run countdown.
+	SpeedrunBootFlashLeft int   // Ticks remaining for the boot "GO" flash.
+
 	// Internal tracking.
 	prevScoreInt int
 	levelDone    bool
 	died         bool
+}
+
+// Speedrun phase constants.
+const (
+	SpeedrunPhaseCountdown = 0
+	SpeedrunPhaseRunning   = 1
+	SpeedrunPhaseFinished  = 2
+)
+
+// Speedrun countdown timing (logic ticks at 16 FPS).
+const (
+	SpeedrunCountdownPerStep    = 16 // 1 second per "3", "2", "1".
+	SpeedrunCountdownStepCount  = 3
+	SpeedrunCountdownTotalTicks = SpeedrunCountdownPerStep * SpeedrunCountdownStepCount
+	SpeedrunBootFlashTicks      = 8 // 0.5 s.
+)
+
+// BeginSpeedrunCountdown puts the engine into the pre-run countdown
+// phase with the timer reset. Called by the wrapper when starting or
+// restarting a speedrun, and internally on a death-restart.
+func (e *GameEnv) BeginSpeedrunCountdown() {
+	e.SpeedrunPhase = SpeedrunPhaseCountdown
+	e.SpeedrunCountdownLeft = SpeedrunCountdownTotalTicks
+	e.SpeedrunBootFlashLeft = 0
+	e.SpeedrunRunTicks = 0
+}
+
+// SpeedrunTicksToCs converts logic ticks (16 FPS) to centiseconds.
+func SpeedrunTicksToCs(t int64) int64 {
+	// 1 tick = 1/16 s = 100/16 cs = 6.25 cs. Use integer math: t*25/4.
+	return t * 25 / 4
 }
 
 // NewGameEnv creates a new game environment.
@@ -141,6 +186,16 @@ func (e *GameEnv) InitTitle() {
 	e.TitleFrame = 0
 	e.CavernNumber = 0
 	e.MusicNoteIndex = 0
+
+	// Title is the canonical "fresh start" — clear any leftover speedrun
+	// session (overall mode game-over, manual exit, etc.).
+	e.SpeedrunActive = false
+	e.SpeedrunIsOverall = false
+	e.SpeedrunPhase = SpeedrunPhaseCountdown
+	e.SpeedrunRunTicks = 0
+	e.SpeedrunFinalCs = 0
+	e.SpeedrunCountdownLeft = 0
+	e.SpeedrunBootFlashLeft = 0
 
 	// Build title screen buffers.
 	// The title screen graphic data is in raw ZX Spectrum display file format
@@ -385,6 +440,34 @@ func (e *GameEnv) stepPlaying(act action.Action) {
 		return
 	}
 
+	// Speedrun pre-run countdown: paint the cavern + Willy as a static
+	// scene and skip all gameplay logic. When the countdown reaches
+	// zero we flip to Running; the next tick runs gameplay normally.
+	if e.SpeedrunActive && e.SpeedrunPhase == SpeedrunPhaseCountdown {
+		if e.SpeedrunCountdownLeft > 0 {
+			e.SpeedrunCountdownLeft--
+		}
+		if e.SpeedrunCountdownLeft <= 0 {
+			e.SpeedrunPhase = SpeedrunPhaseRunning
+			e.SpeedrunBootFlashLeft = SpeedrunBootFlashTicks
+		}
+		copy(e.WorkAttr[:], e.EmptyAttr[:])
+		copy(e.WorkPixels[:], e.EmptyPixels[:])
+		if e.Willy != nil && e.Willy.Alive {
+			e.Willy.SetAttributes(e.CurrentCavern, e.WorkAttr[:])
+			e.Willy.Draw(e.WorkPixels[:])
+		}
+		return
+	}
+
+	// Running phase: tick the timer and decay the boot-flash counter.
+	if e.SpeedrunActive && e.SpeedrunPhase == SpeedrunPhaseRunning {
+		e.SpeedrunRunTicks++
+		if e.SpeedrunBootFlashLeft > 0 {
+			e.SpeedrunBootFlashLeft--
+		}
+	}
+
 	// Copy empty buffers into working buffers.
 	copy(e.WorkAttr[:], e.EmptyAttr[:])
 	copy(e.WorkPixels[:], e.EmptyPixels[:])
@@ -547,7 +630,13 @@ func (e *GameEnv) stepDying() {
 	// Original death animation takes ~0.12 seconds (8 iterations of colour
 	// flash + short sound). At 16 FPS, 0.12s ≈ 2 frames. Use 2 frames.
 	if e.AnimCounter >= 2 {
-		if e.InfiniteLives {
+		// In single-cavern speedrun, death always restarts the cavern
+		// (with a fresh countdown) instead of ending the game. Overall
+		// speedrun uses normal lives rules — out of lives = game over.
+		if e.SpeedrunActive && !e.SpeedrunIsOverall {
+			e.Reset(e.CavernNumber)
+			e.BeginSpeedrunCountdown()
+		} else if e.InfiniteLives {
 			e.Reset(e.CavernNumber) // Don't decrement lives.
 		} else if e.Lives > 0 {
 			e.Lives--
@@ -658,6 +747,16 @@ const (
 	nextPhaseDrain   = 1
 )
 
+// tickSpeedrunIfRunning advances the speedrun tick counter during the
+// cavern-transition step. Gated on FinalCs==0 so that once the portal
+// has frozen the timer (single mode, or final barrier in overall) we
+// don't keep counting time during the celebration animation.
+func (e *GameEnv) tickSpeedrunIfRunning() {
+	if e.SpeedrunActive && e.SpeedrunPhase == SpeedrunPhaseRunning && e.SpeedrunFinalCs == 0 {
+		e.SpeedrunRunTicks++
+	}
+}
+
 // stepNextCavern handles the cavern transition animation.
 //
 // Original (MoveToTheNextCavern5..10):
@@ -665,6 +764,7 @@ const (
 //   2. Loop: decrement air, +1 to score, short tone whose pitch comes from
 //      the remaining air, until air ≤ 0x24 — then start the next cavern.
 func (e *GameEnv) stepNextCavern() {
+	e.tickSpeedrunIfRunning()
 	switch e.NextCavernPhase {
 	case nextPhaseColours:
 		e.AnimCounter++
@@ -685,9 +785,18 @@ func (e *GameEnv) stepNextCavern() {
 		}
 
 	case nextPhaseDrain:
-		// Air drained; advance to the next cavern.
+		// Air drained.
 		if e.Air <= 0x24 {
 			e.SoundRequest = 0
+			// Single-cavern speedrun: the transition animation has
+			// finished. Hand control to the wrapper by flipping to
+			// Finished — the wrapper will save the time (if it
+			// qualifies) and call back into the engine to restart the
+			// same cavern with a fresh countdown.
+			if e.SpeedrunActive && !e.SpeedrunIsOverall {
+				e.SpeedrunPhase = SpeedrunPhaseFinished
+				return
+			}
 			next := e.CavernNumber + 1
 			if next >= NumCaverns {
 				next = 0
@@ -778,10 +887,21 @@ func (e *GameEnv) decreaseAir() {
 func (e *GameEnv) moveToNextCavern() {
 	e.levelDone = true
 
-	// The Final Barrier (cavern 19): trigger the swordfish ending sequence.
-	// Original: MoveToTheNextCavern at $8A3F branches on cavern==20. We
-	// always run the ending — even with cheats active — per design choice.
-	if e.CavernNumber == NumCaverns-1 {
+	isFinal := e.CavernNumber == NumCaverns-1
+
+	// Speedrun timer freezing rules:
+	//   single  → freeze on every portal touch (only one run per cavern).
+	//   overall → keep ticking across transitions; only freeze when the
+	//             final barrier is reached.
+	// FinalCs > 0 is what gates the timer-tick + displayed-time helpers.
+	if e.SpeedrunActive && (!e.SpeedrunIsOverall || isFinal) {
+		e.SpeedrunFinalCs = SpeedrunTicksToCs(e.SpeedrunRunTicks)
+	}
+
+	if isFinal {
+		// For an overall speedrun, the swordfish/Final Barrier ending
+		// animation still plays; stepFinalEnding sets Phase=Finished
+		// when it completes.
 		e.startFinalEnding()
 		return
 	}
@@ -881,6 +1001,12 @@ func (e *GameEnv) stepFinalEnding() {
 		e.SoundPitch = s * 2
 
 	case finalPhaseDone:
+		// Overall speedrun: the final ending has played out — hand off
+		// to the wrapper for records flow instead of looping the game.
+		if e.SpeedrunActive && e.SpeedrunIsOverall {
+			e.SpeedrunPhase = SpeedrunPhaseFinished
+			return
+		}
 		// Restart at Central Cavern. Score and lives persist (matches
 		// the original — no score reset between game loops).
 		e.SoundRequest = 0

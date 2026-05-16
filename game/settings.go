@@ -18,18 +18,20 @@ type SettingsScreen struct {
 }
 
 const (
-	settingsItemControls0 = 0 // Original
-	settingsItemControls1 = 1 // Arrows + Space
-	settingsItemControls2 = 2 // O/P + Space
-	settingsItemInfLives  = 3
-	settingsItemInvuln    = 4
-	settingsItemInfAir    = 5
-	settingsItemHarmless  = 6
-	settingsItemNoNasties = 7
-	settingsItemNoGuards  = 8
-	settingsItemWarp      = 9
-	settingsItemName      = 10
-	settingsItemCount     = 11
+	settingsItemControls0     = 0 // Original
+	settingsItemControls1     = 1 // Arrows + Space
+	settingsItemControls2     = 2 // O/P + Space
+	settingsItemInfLives      = 3
+	settingsItemInvuln        = 4
+	settingsItemInfAir        = 5
+	settingsItemHarmless      = 6
+	settingsItemNoNasties     = 7
+	settingsItemNoGuards      = 8
+	settingsItemWarp          = 9
+	settingsItemSpeedrun      = 10
+	settingsItemSpeedrunMode  = 11
+	settingsItemName          = 12
+	settingsItemCount         = 13
 )
 
 func newSettingsScreen() *SettingsScreen {
@@ -87,6 +89,14 @@ func (s *SettingsScreen) update(cfg *config.Config) bool {
 			cfg.Features.NoGuardians = !cfg.Features.NoGuardians
 		case settingsItemWarp:
 			cfg.Features.WarpMode = !cfg.Features.WarpMode
+		case settingsItemSpeedrun:
+			cfg.SpeedrunEnabled = !cfg.SpeedrunEnabled
+		case settingsItemSpeedrunMode:
+			if cfg.SpeedrunMode == config.SpeedrunModeSingle {
+				cfg.SpeedrunMode = config.SpeedrunModeOverall
+			} else {
+				cfg.SpeedrunMode = config.SpeedrunModeSingle
+			}
 		case settingsItemName:
 			s.editingName = !s.editingName
 			s.nameCursor = 0
@@ -191,6 +201,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 		{"No Nasties", cfg.Features.NoNasties, settingsItemNoNasties},
 		{"No Guardians", cfg.Features.NoGuardians, settingsItemNoGuards},
 		{"Warp Mode", cfg.Features.WarpMode, settingsItemWarp},
+		{"Speedrun", cfg.SpeedrunEnabled, settingsItemSpeedrun},
 	}
 	for _, t := range toggles {
 		row := 11 + (t.item - settingsItemInfLives)
@@ -206,8 +217,20 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 		}
 	}
 
+	// Speedrun mode picker (sits with the toggles list visually).
+	modeRow := 11 + (settingsItemSpeedrunMode - settingsItemInfLives)
+	if s.cursor == settingsItemSpeedrunMode {
+		screen.PrintMessage(display, 1*8, modeRow*8, cursorChar, yellow)
+	}
+	screen.PrintMessage(display, 2*8, modeRow*8, "Mode", itemAttr(settingsItemSpeedrunMode))
+	modeLabel := "[SINGLE ]"
+	if cfg.SpeedrunMode == config.SpeedrunModeOverall {
+		modeLabel = "[OVERALL]"
+	}
+	screen.PrintMessage(display, 20*8, modeRow*8, modeLabel, cyan)
+
 	// Player name.
-	row := 18
+	row := 20
 	if s.cursor == settingsItemName {
 		screen.PrintMessage(display, 1*8, row*8, cursorChar, yellow)
 	}
@@ -230,7 +253,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 	}
 
 	// Help text.
-	screen.PrintMessage(display, 2*8, 20*8, "UP/DOWN Navigate", yellow)
-	screen.PrintMessage(display, 2*8, 21*8, "ENTER  Select/Toggle", yellow)
-	screen.PrintMessage(display, 2*8, 22*8, "ESC    Back to title", yellow)
+	screen.PrintMessage(display, 2*8, 21*8, "UP/DOWN Navigate", yellow)
+	screen.PrintMessage(display, 2*8, 22*8, "ENTER  Select/Toggle", yellow)
+	screen.PrintMessage(display, 2*8, 23*8, "ESC    Back to title", yellow)
 }

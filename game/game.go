@@ -45,9 +45,17 @@ type Game struct {
 	warpScreen          *WarpScreen
 	helpScreen          *HelpScreen
 	loadingScreen       *LoadingScreen
+	recordsScreen       *RecordsScreen
 	settingsFromLoading bool // True when settings was entered from the loading screen.
 	escExitPending      bool
 	screenshotHeld      bool
+
+	// Speedrun wrapper-side bookkeeping (timing lives in the engine).
+	speedrunKeyHeld    bool
+	speedrunPending    bool // True when a finished run is being routed.
+	speedrunNameOK     bool // True when current NameEntryScreen is for a speedrun.
+	warpStartsSpeedrun bool // True when the warp screen should kick off a single-cavern speedrun.
+	titleSKeyHeld      bool // Debounce S on the title screen.
 
 	// Gameplay recorder (Shift+R): video + audio → mp4 via ffmpeg.
 	recorder    *Recorder
@@ -165,6 +173,29 @@ func (g *Game) logicTick() {
 		g.nameEntryScr.update()
 		if g.nameEntryScr.Done {
 			name := g.nameEntryScr.nameString()
+			if g.nameEntryScr.IsSpeedrun {
+				g.cfg.AddSpeedrunRecord(
+					g.nameEntryScr.SpeedrunIsOverall,
+					g.nameEntryScr.Cavern,
+					name,
+					g.nameEntryScr.SpeedrunCs,
+				)
+				g.cfg.PlayerName = name
+				g.cfg.Save()
+				isOverall := g.nameEntryScr.SpeedrunIsOverall
+				cavern := g.nameEntryScr.Cavern
+				g.nameEntryScr = nil
+				g.speedrunPending = false
+				g.speedrunNameOK = false
+				if isOverall {
+					g.endSpeedrunForTitle()
+					g.env.InitTitle()
+					g.env.BannerLength = len(extendedBanner) - 31
+				} else {
+					g.startSpeedrun(cavern)
+				}
+				return
+			}
 			g.cfg.AddHighScore(name, g.nameEntryScr.Score, g.nameEntryScr.Cavern)
 			g.cfg.PlayerName = name
 			g.cfg.Save()
@@ -186,10 +217,22 @@ func (g *Game) logicTick() {
 		result := g.warpScreen.update()
 		if result == -2 {
 			g.warpScreen = nil
-			g.env.State = engine.StatePlaying
+			if g.warpStartsSpeedrun {
+				// Cancelled from the title-screen speedrun selector.
+				g.warpStartsSpeedrun = false
+				g.env.InitTitle()
+				g.env.BannerLength = len(extendedBanner) - 31
+			} else {
+				g.env.State = engine.StatePlaying
+			}
 		} else if result >= 0 {
 			g.warpScreen = nil
-			g.lastObs = g.env.Reset(result)
+			if g.warpStartsSpeedrun {
+				g.warpStartsSpeedrun = false
+				g.startSpeedrun(result)
+			} else {
+				g.lastObs = g.env.Reset(result)
+			}
 		}
 		return
 
@@ -199,6 +242,17 @@ func (g *Game) logicTick() {
 		}
 		if g.helpScreen.update() {
 			g.helpScreen = nil
+			g.env.InitTitle()
+			g.env.BannerLength = len(extendedBanner) - 31
+		}
+		return
+
+	case engine.StateRecords:
+		if g.recordsScreen == nil {
+			g.recordsScreen = newRecordsScreen()
+		}
+		if g.recordsScreen.update() {
+			g.recordsScreen = nil
 			g.env.InitTitle()
 			g.env.BannerLength = len(extendedBanner) - 31
 		}
@@ -222,10 +276,18 @@ func (g *Game) logicTick() {
 			g.lastObs = g.env.Reset(g.env.CavernNumber)
 			return
 		}
-		// Escape exits to title screen. Save progress and check high score.
+		// Escape exits to the title screen. During a speedrun this
+		// abandons the run with no record saved; the speedrun state is
+		// cleared by InitTitle.
 		if ebiten.IsKeyPressed(ebiten.KeyEscape) {
 			g.audioPlayer.Silence()
 			g.cfg.LastCavern = g.env.CavernNumber
+			if g.env.SpeedrunActive {
+				g.cfg.Save()
+				g.env.InitTitle()
+				g.env.BannerLength = len(extendedBanner) - 31
+				return
+			}
 			score := g.env.ScoreInt()
 			if g.cfg.QualifiesForHighScore(score) {
 				g.escExitPending = true
@@ -237,6 +299,34 @@ func (g *Game) logicTick() {
 			g.env.InitGameOver()
 			return
 		}
+
+		// S during gameplay toggles speedrun mode: enter a single-
+		// cavern speedrun on the current cavern, or exit one back to
+		// normal play. Edge-detected.
+		if ebiten.IsKeyPressed(ebiten.KeyS) {
+			if !g.speedrunKeyHeld {
+				g.speedrunKeyHeld = true
+				g.audioPlayer.Silence()
+				if g.env.SpeedrunActive {
+					g.stopSpeedrun()
+				} else {
+					g.startSpeedrun(g.env.CavernNumber)
+				}
+				return
+			}
+		} else {
+			g.speedrunKeyHeld = false
+		}
+	}
+
+	// Engine reports the run is complete (portal reached and the
+	// regular cavern-end animation has played out). The engine sits in
+	// StateNextCavern / StateFinalEnding with Phase==Finished; route to
+	// the records flow regardless of state.
+	if g.env.SpeedrunActive && g.env.SpeedrunPhase == engine.SpeedrunPhaseFinished && !g.speedrunPending {
+		g.speedrunPending = true
+		g.finishSpeedrun()
+		return
 	}
 
 	// Music toggle.
@@ -292,6 +382,35 @@ func (g *Game) logicTick() {
 			g.env.State = engine.StateHelp
 			g.helpScreen = newHelpScreen()
 			return
+		}
+
+		// Speedrun-aware Enter on title: when speedrun is enabled in
+		// settings, Enter starts a speedrun instead of a normal game.
+		if g.cfg.SpeedrunEnabled && ebiten.IsKeyPressed(ebiten.KeyEnter) {
+			if g.cfg.SpeedrunMode == config.SpeedrunModeOverall {
+				g.startSpeedrunOverall()
+				return
+			}
+			// Single-cavern mode: open the warp screen so the player
+			// can pick the cavern to speedrun. The selection branch
+			// reads warpStartsSpeedrun.
+			g.warpStartsSpeedrun = true
+			g.env.State = engine.StateWarp
+			g.warpScreen = newWarpScreen()
+			g.warpScreen.cursor = g.cfg.LastCavern
+			return
+		}
+
+		// S on title → combined high-score + speedrun records.
+		if ebiten.IsKeyPressed(ebiten.KeyS) {
+			if !g.titleSKeyHeld {
+				g.titleSKeyHeld = true
+				g.env.State = engine.StateRecords
+				g.recordsScreen = newRecordsScreen()
+				return
+			}
+		} else {
+			g.titleSKeyHeld = false
 		}
 	}
 
@@ -425,6 +544,10 @@ func (g *Game) Draw(scr *ebiten.Image) {
 	case engine.StateHelp:
 		if g.helpScreen != nil {
 			g.helpScreen.draw(g.display, g.frameCount)
+		}
+	case engine.StateRecords:
+		if g.recordsScreen != nil {
+			g.recordsScreen.draw(g.display, g.cfg, g.frameCount)
 		}
 	}
 
@@ -653,6 +776,15 @@ func (g *Game) drawLives() {
 		}
 	}
 
+	// Speedrun override: countdown phase draws 3→2→1 mini-Willys then
+	// the boot ("GO"); running phase draws a timer on the right (in
+	// line with where the mini-Willy lives normally sit) and briefly
+	// keeps the boot visible on the left as a "started" signal.
+	if g.env.SpeedrunActive {
+		g.drawSpeedrunLivesRow()
+		return
+	}
+
 	lives := g.env.Lives
 	if lives <= 0 {
 		return
@@ -714,6 +846,91 @@ func (g *Game) drawLives() {
 					if x < ScreenWidth && y < ScreenHeight {
 						g.display.Set(x, y, cyan)
 					}
+				}
+			}
+		}
+	}
+}
+
+// drawSpeedrunLivesRow renders the lives row during a speedrun.
+//
+//   Countdown phase  → N mini-Willys (3 → 2 → 1) drawn from the left.
+//   Running/Finished → the cavern's record time stays pinned on the
+//                      left in cyan (replaces the boot "GO" indicator)
+//                      and the live timer is right-aligned in yellow.
+func (g *Game) drawSpeedrunLivesRow() {
+	cyan := color.RGBA{0, 215, 215, 255}
+
+	if g.env.SpeedrunPhase == engine.SpeedrunPhaseCountdown {
+		n := g.speedrunCountdownDisplayLives()
+		if n > 0 {
+			animIdx := ((g.env.MusicNoteIndex << 3) & 0x60) >> 5
+			spriteData := data.WillySprites[animIdx]
+			for i := 0; i < n; i++ {
+				drawSpriteAt(g.display, i*16, 168, spriteData[:], cyan)
+			}
+		}
+		return
+	}
+
+	// Running / Finished: record-countdown on the left, current time
+	// on the right — both nudged one character (8 px) to the left.
+	recordText := g.speedrunRecordDisplay()
+	screen.PrintMessage(g.display, -4, 172, recordText, 0x45) // BRIGHT cyan.
+
+	timer := formatSpeedrunTime(g.currentSpeedrunCs())
+	x := ScreenWidth - len(timer)*8 - 12
+	screen.PrintMessage(g.display, x, 172, timer, 0x46) // BRIGHT yellow.
+}
+
+// speedrunRecordDisplay returns the "time to beat" string shown to
+// the left of the live timer during a speedrun. It counts DOWN from
+// the cavern's record toward zero, then keeps going into negatives
+// with a leading "-" so the player can see how far behind they are.
+//
+// Always 9 characters wide (" MM:SS:cc" / "-MM:SS:cc") — the leading
+// space (or sign) shifts everything one position right so the minus
+// has room to slot in without re-laying-out the row.
+// Returns " --:--:--" when no record exists yet.
+func (g *Game) speedrunRecordDisplay() string {
+	var record int64
+	if g.env.SpeedrunIsOverall {
+		record = g.cfg.FastestOverall().Centiseconds
+	} else {
+		record = g.cfg.FastestForCavern(g.env.SpeedrunCavern).Centiseconds
+	}
+	if record <= 0 {
+		return " --:--:--"
+	}
+	remaining := record - g.currentSpeedrunCs()
+	sign := " "
+	if remaining < 0 {
+		sign = "-"
+		remaining = -remaining
+	}
+	return sign + formatSpeedrunTime(remaining)
+}
+
+// drawSpriteAt blits a 16×16 two-byte-per-row sprite into the display
+// at (x, y) using the given colour. Bits set in the sprite data draw,
+// others are transparent.
+func drawSpriteAt(display *ebiten.Image, x, y int, sprite []byte, c color.RGBA) {
+	for row := 0; row < 16; row++ {
+		leftByte := sprite[row*2]
+		rightByte := sprite[row*2+1]
+		for bit := 7; bit >= 0; bit-- {
+			if leftByte&(1<<uint(bit)) != 0 {
+				px := x + (7 - bit)
+				py := y + row
+				if px >= 0 && px < ScreenWidth && py >= 0 && py < ScreenHeight {
+					display.Set(px, py, c)
+				}
+			}
+			if rightByte&(1<<uint(bit)) != 0 {
+				px := x + 8 + (7 - bit)
+				py := y + row
+				if px >= 0 && px < ScreenWidth && py >= 0 && py < ScreenHeight {
+					display.Set(px, py, c)
 				}
 			}
 		}

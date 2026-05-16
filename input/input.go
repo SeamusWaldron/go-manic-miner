@@ -73,9 +73,8 @@ func Read(scheme config.ControlScheme) State {
 			ebiten.IsKeyPressed(ebiten.KeyDigit7)
 	}
 
-	// Pause: A-G (all schemes).
+	// Pause: A/D/F/G (S is reserved for the speedrun toggle).
 	s.Pause = ebiten.IsKeyPressed(ebiten.KeyA) ||
-		ebiten.IsKeyPressed(ebiten.KeyS) ||
 		ebiten.IsKeyPressed(ebiten.KeyD) ||
 		ebiten.IsKeyPressed(ebiten.KeyF) ||
 		ebiten.IsKeyPressed(ebiten.KeyG)

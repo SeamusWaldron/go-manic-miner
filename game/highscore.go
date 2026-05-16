@@ -76,14 +76,20 @@ func (h *HighScoreScreen) draw(display *ebiten.Image, cfg *config.Config, frameC
 	screen.PrintMessage(display, 3*8, 20*8, "PRESS ANY KEY TO CONTINUE", flashAttr)
 }
 
-// NameEntryScreen handles entering a name for a new high score.
+// NameEntryScreen handles entering a name for a new high score OR a
+// new speedrun record. When IsSpeedrun is true the screen displays the
+// time (in centiseconds) instead of a score, and the wrapper routes
+// the saved entry into the speedrun records table.
 type NameEntryScreen struct {
-	Name     [3]byte
-	Cursor   int // 0-2.
-	Score    int
-	Cavern   int
-	debounce int
-	Done     bool
+	Name             [3]byte
+	Cursor           int // 0-2.
+	Score            int
+	Cavern           int
+	debounce         int
+	Done             bool
+	IsSpeedrun       bool
+	SpeedrunIsOverall bool
+	SpeedrunCs       int64
 }
 
 func newNameEntryScreen(score int, cavern int, defaultName string) *NameEntryScreen {
@@ -98,6 +104,16 @@ func newNameEntryScreen(score int, cavern int, defaultName string) *NameEntryScr
 			n.Name[i] = 'A'
 		}
 	}
+	return n
+}
+
+// newSpeedrunNameEntryScreen creates a name-entry screen for a new
+// speedrun record. The wrapper distinguishes via IsSpeedrun.
+func newSpeedrunNameEntryScreen(cs int64, cavern int, isOverall bool, defaultName string) *NameEntryScreen {
+	n := newNameEntryScreen(0, cavern, defaultName)
+	n.IsSpeedrun = true
+	n.SpeedrunIsOverall = isOverall
+	n.SpeedrunCs = cs
 	return n
 }
 
@@ -142,14 +158,22 @@ func (n *NameEntryScreen) draw(display *ebiten.Image, frameCount int) {
 	cyan := byte(0x45)
 	white := byte(0x47)
 
-	// Flash "NEW HIGH SCORE!".
+	// Flash header — adapts to the entry type.
 	flashAttr := yellow
 	if frameCount/8%2 == 0 {
 		flashAttr = yellow | 0x80
 	}
-	screen.PrintMessage(display, 6*8, 3*8, "NEW HIGH SCORE!", flashAttr)
-
-	screen.PrintMessage(display, 9*8, 6*8, fmt.Sprintf("SCORE: %06d", n.Score), white)
+	if n.IsSpeedrun {
+		header := "NEW SPEEDRUN TIME!"
+		x := (256 - len(header)*8) / 2
+		screen.PrintMessage(display, x, 3*8, header, flashAttr)
+		body := fmt.Sprintf("TIME  %s", formatSpeedrunTime(n.SpeedrunCs))
+		bx := (256 - len(body)*8) / 2
+		screen.PrintMessage(display, bx, 6*8, body, white)
+	} else {
+		screen.PrintMessage(display, 6*8, 3*8, "NEW HIGH SCORE!", flashAttr)
+		screen.PrintMessage(display, 9*8, 6*8, fmt.Sprintf("SCORE: %06d", n.Score), white)
+	}
 	screen.PrintMessage(display, 7*8, 9*8, "ENTER YOUR NAME", cyan)
 
 	// Name characters.
