@@ -20,6 +20,7 @@ const (
 // Features holds cheat/modifier flags.
 type Features struct {
 	InfiniteLives    bool `json:"infiniteLives"`
+	Invulnerable     bool `json:"invulnerable"`
 	InfiniteAir      bool `json:"infiniteAir"`
 	HarmlessHeights  bool `json:"harmlessHeights"`
 	NoNasties        bool `json:"noNasties"`

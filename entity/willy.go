@@ -29,6 +29,8 @@ type Willy struct {
 	CellY     int  // Y position in cell rows (0-15). Derived from Y2.
 	JumpCount int  // Jump animation counter (0-17).
 	Alive     bool
+
+	Invulnerable bool // When true, Kill() is a no-op.
 }
 
 // NewWilly creates Willy from the cavern's initial state.
@@ -180,6 +182,10 @@ func (w *Willy) checkGround(cav *cavern.Cavern, attrs []byte, pixels []byte) {
 	belowY := w.CellY + 2
 	if belowY >= 16 {
 		w.Kill()
+		if !w.Alive {
+			return
+		}
+		w.Airborne = 0
 		return
 	}
 
@@ -233,7 +239,9 @@ func (w *Willy) checkGround(cav *cavern.Cavern, attrs []byte, pixels []byte) {
 	// platforms mid-jump at the JC=13 and JC=16 checkpoints.
 	if w.Airborne >= 12 && w.Airborne != 255 {
 		w.Kill()
-		return
+		if !w.Alive {
+			return
+		}
 	}
 	w.Airborne = 0
 }
@@ -362,6 +370,15 @@ func (w *Willy) isWallAt(cav *cavern.Cavern, attrs []byte, x, y int) bool {
 }
 
 func (w *Willy) Kill() {
+	if w.Invulnerable {
+		return
+	}
+	w.ForceKill()
+}
+
+// ForceKill kills Willy regardless of the Invulnerable flag.
+// Used for non-bypassable death conditions like running out of air.
+func (w *Willy) ForceKill() {
 	w.Airborne = 255
 	w.Alive = false
 }

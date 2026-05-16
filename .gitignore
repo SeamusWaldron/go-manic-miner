@@ -27,3 +27,6 @@ extract_caverns.py
 
 # Screenshots
 screenshot_*.png
+
+# Gameplay recordings
+recordings/

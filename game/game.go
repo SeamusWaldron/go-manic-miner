@@ -39,13 +39,20 @@ type Game struct {
 	musicToggleHeld bool
 
 	// Sub-screens.
-	settingsScreen  *SettingsScreen
-	highScoreScr    *HighScoreScreen
-	nameEntryScr    *NameEntryScreen
-	warpScreen      *WarpScreen
-	helpScreen      *HelpScreen
-	escExitPending  bool
-	screenshotHeld  bool
+	settingsScreen      *SettingsScreen
+	highScoreScr        *HighScoreScreen
+	nameEntryScr        *NameEntryScreen
+	warpScreen          *WarpScreen
+	helpScreen          *HelpScreen
+	loadingScreen       *LoadingScreen
+	settingsFromLoading bool // True when settings was entered from the loading screen.
+	escExitPending      bool
+	screenshotHeld      bool
+
+	// Gameplay recorder (Shift+R): video + audio → mp4 via ffmpeg.
+	recorder    *Recorder
+	recordHeld  bool
+	frameRGBA   []byte // reusable scratch buffer for ReadPixels.
 }
 
 // New creates a new Game instance for human play.
@@ -66,12 +73,23 @@ func New() *Game {
 		cfg:         cfg,
 		lastObs:     env.GetObservation(),
 		musicStep:   60,
+		recorder:    &Recorder{},
+		frameRGBA:   make([]byte, ScreenWidth*ScreenHeight*4),
 	}
+	// Boot into the faux Spectrum loading screen. The engine itself is
+	// still initialised in StateTitle so headless/AI users are unaffected;
+	// the wrapper just overrides for human play.
+	g.env.State = engine.StateLoading
+	g.loadingScreen = newLoadingScreen()
 	return g
 }
 
 func applyFeatures(env *engine.GameEnv, f *config.Features) {
 	env.InfiniteLives = f.InfiniteLives
+	env.Invulnerable = f.Invulnerable
+	if env.Willy != nil {
+		env.Willy.Invulnerable = f.Invulnerable
+	}
 	env.InfiniteAir = f.InfiniteAir
 	env.HarmlessHeights = f.HarmlessHeights
 	env.NoNasties = f.NoNasties
@@ -95,6 +113,21 @@ func (g *Game) logicTick() {
 
 	// Handle sub-screens that bypass the engine.
 	switch g.env.State {
+	case engine.StateLoading:
+		if g.loadingScreen == nil {
+			g.loadingScreen = newLoadingScreen()
+		}
+		switch g.loadingScreen.update() {
+		case loadingSettings:
+			g.settingsFromLoading = true
+			g.env.State = engine.StateSettings
+		case loadingSkip, loadingTimeout:
+			g.loadingScreen = nil
+			g.env.InitTitle()
+			g.env.BannerLength = len(extendedBanner) - 31
+		}
+		return
+
 	case engine.StateSettings:
 		if g.settingsScreen == nil {
 			g.settingsScreen = newSettingsScreen()
@@ -103,8 +136,14 @@ func (g *Game) logicTick() {
 			g.cfg.Save()
 			applyFeatures(g.env, &g.cfg.Features)
 			g.settingsScreen = nil
-			g.env.InitTitle()
-			g.env.BannerLength = len(extendedBanner) - 31
+			if g.settingsFromLoading {
+				g.settingsFromLoading = false
+				g.env.State = engine.StateLoading
+				g.loadingScreen = newLoadingScreen()
+			} else {
+				g.env.InitTitle()
+				g.env.BannerLength = len(extendedBanner) - 31
+			}
 		}
 		return
 
@@ -328,6 +367,23 @@ func (g *Game) updateAudio() {
 			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
 		}
 
+	case engine.StateFinalEnding:
+		if g.audioPlayer.IsInGameMusicPlaying() {
+			g.audioPlayer.StopInGameMusic()
+		}
+		if g.lastObs.SoundRequest != 0 {
+			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
+		}
+
+	case engine.StateNextCavern:
+		if g.audioPlayer.IsInGameMusicPlaying() {
+			g.audioPlayer.StopInGameMusic()
+		}
+		// Tones during the per-tick air drain (phase 1 of stepNextCavern).
+		if g.lastObs.SoundRequest != 0 {
+			g.audioPlayer.PlaySFX(g.lastObs.SoundPitch)
+		}
+
 	default:
 		g.audioPlayer.Silence()
 	}
@@ -338,11 +394,15 @@ func (g *Game) Draw(scr *ebiten.Image) {
 	scr.Fill(color.Black)
 
 	switch g.env.State {
+	case engine.StateLoading:
+		if g.loadingScreen != nil {
+			g.loadingScreen.draw(g.display, g.renderer)
+		}
 	case engine.StateTitle:
 		g.drawTitle()
 	case engine.StatePlaying, engine.StateDemo:
 		g.drawPlaying()
-	case engine.StateDying, engine.StateNextCavern:
+	case engine.StateDying, engine.StateNextCavern, engine.StateFinalEnding:
 		g.drawPlaying()
 	case engine.StateGameOver:
 		g.drawGameOver()
@@ -368,10 +428,23 @@ func (g *Game) Draw(scr *ebiten.Image) {
 		}
 	}
 
+	// Recording indicator: pulsing red dot in the lives row, vertically
+	// centred on the mini-Willy sprites and padded in from the right edge.
+	if g.recorder != nil && g.recorder.IsActive() {
+		drawRecordingDot(g.display, g.frameCount)
+	}
+
 	scr.DrawImage(g.display, &ebiten.DrawImageOptions{})
 
-	// Screenshot: press Shift+8 (*) to save a PNG.
+	// Capture this frame to the recorder if active.
+	if g.recorder != nil && g.recorder.IsActive() {
+		g.display.ReadPixels(g.frameRGBA)
+		g.recorder.WriteFrame(g.frameRGBA)
+	}
+
 	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight)
+
+	// Screenshot: press Shift+8 (*) to save a PNG.
 	if shift && ebiten.IsKeyPressed(ebiten.KeyDigit8) {
 		if !g.screenshotHeld {
 			g.screenshotHeld = true
@@ -379,6 +452,84 @@ func (g *Game) Draw(scr *ebiten.Image) {
 		}
 	} else {
 		g.screenshotHeld = false
+	}
+
+	// Recording: press Shift+R to start, Shift+R again to stop.
+	if shift && ebiten.IsKeyPressed(ebiten.KeyR) {
+		if !g.recordHeld {
+			g.recordHeld = true
+			g.toggleRecording()
+		}
+	} else {
+		g.recordHeld = false
+	}
+}
+
+func (g *Game) toggleRecording() {
+	if g.recorder == nil {
+		return
+	}
+	if g.recorder.IsActive() {
+		g.audioPlayer.SetRecorder(nil)
+		g.recorder.Stop()
+		return
+	}
+	if err := g.recorder.Start(ScreenWidth, ScreenHeight, 60); err != nil {
+		fmt.Printf("Recording: %v\n", err)
+		return
+	}
+	g.audioPlayer.SetRecorder(g.recorder)
+}
+
+// recordingDotSprite is an 8×8 ZX Spectrum-style filled circle for the
+// recording indicator. One bit per pixel, MSB on the left, top row first.
+var recordingDotSprite = [8]byte{
+	0x3C, // ..####..
+	0x7E, // .######.
+	0xFF, // ########
+	0xFF, // ########
+	0xFF, // ########
+	0xFF, // ########
+	0x7E, // .######.
+	0x3C, // ..####..
+}
+
+// drawRecordingDot renders the pulsing recording indicator. Positioned in
+// the lives row, vertically centred on the mini-Willy mid-line (y≈176) with
+// 4-pixel padding from the right edge.
+//
+// The "pulse" is a discrete two-state alternation that matches the ZX
+// Spectrum's FLASH cadence (swap every 16 frames at 50 Hz, ≈19 frames at
+// our 60 fps display). Frames alternate between INK 2 (normal red,
+// 215,0,0) and BRIGHT 1, INK 2 (bright red, 255,0,0) — exactly what the
+// Spectrum could express via the BRIGHT attribute bit. No gradients.
+func drawRecordingDot(img *ebiten.Image, frameCount int) {
+	const (
+		spriteW = 8
+		spriteH = 8
+		padding = 4
+		// Mini-Willy sprites occupy y=168..183 (16 px tall), mid-line = 176.
+		midY = 176
+		// Frames per state. ZX FLASH = 16 frames @ 50 Hz ≈ 0.32s; at our
+		// 60 fps that's ~19 frames. 19 keeps the cadence authentic.
+		flashFrames = 19
+	)
+	x0 := ScreenWidth - padding - spriteW
+	y0 := midY - spriteH/2
+
+	c := color.RGBA{215, 0, 0, 255} // INK 2 (normal red).
+	if (frameCount/flashFrames)%2 == 0 {
+		c = color.RGBA{255, 0, 0, 255} // BRIGHT 1, INK 2 (bright red).
+	}
+
+	for row := 0; row < spriteH; row++ {
+		bits := recordingDotSprite[row]
+		y := y0 + row
+		for bit := 0; bit < spriteW; bit++ {
+			if bits&(0x80>>uint(bit)) != 0 {
+				img.Set(x0+bit, y, c)
+			}
+		}
 	}
 }
 
@@ -510,6 +661,10 @@ func (g *Game) drawLives() {
 	animIdx := ((g.env.MusicNoteIndex << 3) & 0x60) >> 5
 	spriteData := data.WillySprites[animIdx]
 	cyan := color.RGBA{0, 215, 215, 255}
+	willyColor := cyan
+	if g.env.Invulnerable {
+		willyColor = color.RGBA{255, 0, 0, 255} // Bright red signals invulnerability.
+	}
 
 	for i := 0; i < lives && i < 8; i++ {
 		px := i * 16
@@ -521,7 +676,7 @@ func (g *Game) drawLives() {
 					x := px + (7 - bit)
 					y := 168 + row
 					if x < ScreenWidth && y < ScreenHeight {
-						g.display.Set(x, y, cyan)
+						g.display.Set(x, y, willyColor)
 					}
 				}
 			}
@@ -530,7 +685,7 @@ func (g *Game) drawLives() {
 					x := px + 8 + (7 - bit)
 					y := 168 + row
 					if x < ScreenWidth && y < ScreenHeight {
-						g.display.Set(x, y, cyan)
+						g.display.Set(x, y, willyColor)
 					}
 				}
 			}

@@ -11,4 +11,7 @@ const (
 
 	// Re-export engine constants for backward compatibility within game package.
 	LogicFrameTime = engine.LogicFrameTime
+
+	// Version is the build version reported on the loading screen.
+	Version = "1.0.0"
 )

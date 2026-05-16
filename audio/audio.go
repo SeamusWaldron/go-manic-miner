@@ -3,12 +3,17 @@
 package audio
 
 import (
+	"io"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/ebitengine/oto/v3"
 )
+
+// SampleRate is the audio output rate in Hz. Exported so recorders writing
+// WAV headers can reference it.
+const SampleRate = sampleRate
 
 const (
 	sampleRate    = 44100
@@ -112,6 +117,16 @@ func (p *Player) PlaySFX(pitch int) {
 	p.stream.playBurst(hz, dur)
 }
 
+// SetRecorder routes a copy of every audio sample written to the speaker
+// into the given writer. Pass nil to stop. Used by the gameplay recorder
+// to capture audio while the game plays. The writer must be safe for
+// concurrent use; it is called from oto's audio thread.
+func (p *Player) SetRecorder(w io.Writer) {
+	p.stream.mu.Lock()
+	p.stream.recorder = w
+	p.stream.mu.Unlock()
+}
+
 // Silence stops all audio immediately.
 func (p *Player) Silence() {
 	p.stream.mu.Lock()
@@ -149,6 +164,9 @@ type toneStream struct {
 	igmNoteSamples    int
 	igmSamplesLeft    int
 	igmSilenceSamples int
+
+	// Optional tap that receives a copy of every byte written to the speaker.
+	recorder io.Writer
 }
 
 func newToneStream() *toneStream {
@@ -326,7 +344,15 @@ func (s *toneStream) Read(buf []byte) (int, error) {
 
 	s.mu.Lock()
 	s.burstSamplesLeft = burst
+	rec := s.recorder
 	s.mu.Unlock()
+
+	// Tap: send the same bytes to the recorder if one is attached. The
+	// writer call happens outside the mutex to avoid blocking the audio
+	// thread on disk I/O while gameplay is reading state.
+	if rec != nil && written > 0 {
+		_, _ = rec.Write(buf[:written])
+	}
 
 	return written, nil
 }

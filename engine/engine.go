@@ -21,11 +21,13 @@ const (
 	StateGameOver                 // Game over sequence.
 	StateDemo                     // Demo mode (auto-cycling caverns).
 	StateNextCavern               // Cavern transition animation.
+	StateFinalEnding              // The Final Barrier completion: swordfish + air-drain sequence.
 	StateSettings                 // Settings menu.
 	StateHighScores               // High score table.
 	StateNameEntry                // Name entry for new high score.
 	StateWarp                     // Warp cavern selection screen.
 	StateHelp                     // Help/instructions screen.
+	StateLoading                  // Faux ZX Spectrum loading screen (UI-only, handled in wrapper).
 )
 
 // GameEnv is the headless game environment.
@@ -79,6 +81,7 @@ type GameEnv struct {
 
 	// Feature flags (set from config, checked during gameplay).
 	InfiniteLives   bool
+	Invulnerable    bool
 	InfiniteAir     bool
 	HarmlessHeights bool
 	NoNasties       bool
@@ -95,6 +98,13 @@ type GameEnv struct {
 	GameOverPhase   int
 	GameOverBootY   int
 	GameOverGlisten int
+
+	// Final Barrier ending state.
+	FinalPhase   int
+	FinalCounter int
+
+	// Next-cavern transition phase (colour cycle → air drain).
+	NextCavernPhase int
 
 	// Sound request for current frame (read by wrapper for audio).
 	SoundRequest int // 0=none, 1=jump, 2=fall.
@@ -174,6 +184,7 @@ func (e *GameEnv) Reset(cavernNum int) Observation {
 	e.BorderColour = e.CurrentCavern.BorderColour
 
 	e.Willy = entity.NewWilly(e.CurrentCavern)
+	e.Willy.Invulnerable = e.Invulnerable
 	e.HorizGuardians = entity.NewHorizGuardians(e.CurrentCavern)
 	e.VertGuardians = entity.NewVertGuardians(e.CurrentCavern)
 	e.Items = entity.NewItems(e.CurrentCavern)
@@ -218,6 +229,8 @@ func (e *GameEnv) Step(act action.Action) StepResult {
 		e.stepGameOver()
 	case StateNextCavern:
 		e.stepNextCavern()
+	case StateFinalEnding:
+		e.stepFinalEnding()
 	case StateDemo:
 		e.stepDemo(act)
 	}
@@ -638,28 +651,56 @@ func (e *GameEnv) stepGameOver() {
 	}
 }
 
+// Next-cavern transition phases. Mirrors MoveToTheNextCavern5..10 in the ASM:
+// colour cycle (cell attrs 63→1), then gradual air-to-score drain with tones.
+const (
+	nextPhaseColours = 0
+	nextPhaseDrain   = 1
+)
+
 // stepNextCavern handles the cavern transition animation.
-// Original: 63 iterations of colour cycling (~0.43s) then air-to-score conversion.
-// At 16 FPS, cycle through multiple attribute values per frame to match timing.
+//
+// Original (MoveToTheNextCavern5..10):
+//   1. Walk attribute value 63→1 across the top two-thirds (~250ms).
+//   2. Loop: decrement air, +1 to score, short tone whose pitch comes from
+//      the remaining air, until air ≤ 0x24 — then start the next cavern.
 func (e *GameEnv) stepNextCavern() {
-	e.AnimCounter++
+	switch e.NextCavernPhase {
+	case nextPhaseColours:
+		e.AnimCounter++
 
-	// Cycle through ~9 attribute values per frame (63 values / 7 frames ≈ 0.43s).
-	baseAttr := 0x3F - (e.AnimCounter * 9)
-	if baseAttr < 1 {
-		baseAttr = 1
-	}
-	attr := byte(baseAttr)
-	for i := range e.WorkAttr {
-		e.WorkAttr[i] = attr
-	}
-
-	if e.AnimCounter >= 7 {
-		next := e.CavernNumber + 1
-		if next >= NumCaverns {
-			next = 0
+		// Cycle through ~9 attribute values per frame (63 values / 7 frames ≈ 0.43s).
+		baseAttr := 0x3F - (e.AnimCounter * 9)
+		if baseAttr < 1 {
+			baseAttr = 1
 		}
-		e.Reset(next)
+		attr := byte(baseAttr)
+		for i := range e.WorkAttr {
+			e.WorkAttr[i] = attr
+		}
+		e.SoundRequest = 0
+
+		if e.AnimCounter >= 7 {
+			e.NextCavernPhase = nextPhaseDrain
+		}
+
+	case nextPhaseDrain:
+		// Air drained; advance to the next cavern.
+		if e.Air <= 0x24 {
+			e.SoundRequest = 0
+			next := e.CavernNumber + 1
+			if next >= NumCaverns {
+				next = 0
+			}
+			e.Reset(next)
+			return
+		}
+		e.Air--
+		entity.AddToScore(e.Score[:], 9, 1)
+		// Pitch matches MoveToTheNextCavern at $8AD9: D = 2 * ((~air) & 0x3F).
+		s := int((^e.Air) & 0x3F)
+		e.SoundRequest = 1
+		e.SoundPitch = s * 2
 	}
 }
 
@@ -726,7 +767,7 @@ func (e *GameEnv) decreaseAir() {
 	if e.GameClock == 0xFC {
 		if e.Air <= 0x24 {
 			if e.Willy != nil {
-				e.Willy.Kill()
+				e.Willy.ForceKill()
 			}
 			return
 		}
@@ -735,14 +776,116 @@ func (e *GameEnv) decreaseAir() {
 }
 
 func (e *GameEnv) moveToNextCavern() {
-	// Convert remaining air to score.
-	for e.Air > 0x24 {
-		e.Air--
-		entity.AddToScore(e.Score[:], 9, 1)
-	}
 	e.levelDone = true
+
+	// The Final Barrier (cavern 19): trigger the swordfish ending sequence.
+	// Original: MoveToTheNextCavern at $8A3F branches on cavern==20. We
+	// always run the ending — even with cheats active — per design choice.
+	if e.CavernNumber == NumCaverns-1 {
+		e.startFinalEnding()
+		return
+	}
+
+	// Begin the next-cavern transition: colour cycle first, then gradual
+	// air-to-score drain. Matches MoveToTheNextCavern5..10 in the ASM.
 	e.State = StateNextCavern
 	e.AnimCounter = 0
+	e.NextCavernPhase = nextPhaseColours
+}
+
+// Final ending phases.
+const (
+	finalPhaseCelebrate = 0 // Celebratory tone over the swordfish scene.
+	finalPhaseColors    = 1 // INK/PAPER cycle from 0x3F down to 0x01.
+	finalPhaseDrain     = 2 // Air drains tick-by-tick, each tick scoring +1.
+	finalPhaseDone      = 3 // Reset to Central Cavern.
+)
+
+// startFinalEnding draws the swordfish + above-ground Willy scene and primes
+// the ending state machine. Mirrors MoveToTheNextCavern at $8A45 onwards.
+func (e *GameEnv) startFinalEnding() {
+	e.State = StateFinalEnding
+	e.FinalPhase = finalPhaseCelebrate
+	e.FinalCounter = 0
+
+	// Draw the swordfish (cell col=19, row=5; pixel y=40) over the omega portal.
+	screen.DrawSprite(e.WorkPixels[:], 40, 19, data.SwordfishGraphic[:], screen.DrawOverwrite)
+	// Draw Willy (frame 2, standing right) above ground at (col=19, row=2; pixel y=16).
+	willySprite := data.WillySprites[2]
+	screen.DrawSprite(e.WorkPixels[:], 16, 19, willySprite[:], screen.DrawOverwrite)
+
+	// Scene attributes — values from the ASM at $8A55..$8A8B.
+	e.WorkAttr[2*32+19] = 0x2F // Sky behind Willy: INK 7 PAPER 5 (white on cyan).
+	e.WorkAttr[2*32+20] = 0x2F
+	e.WorkAttr[3*32+19] = 0x27 // Grass: INK 7 PAPER 4 (white on green).
+	e.WorkAttr[3*32+20] = 0x27
+	e.WorkAttr[5*32+19] = 0x45 // Fish body: BRIGHT 1 INK 5 (cyan).
+	e.WorkAttr[5*32+20] = 0x45
+	e.WorkAttr[6*32+19] = 0x46 // Sword handle: BRIGHT 1 INK 6 (yellow).
+	e.WorkAttr[6*32+20] = 0x47 // Sword blade: BRIGHT 1 INK 7 (white).
+	e.WorkAttr[7*32+19] = 0x00 // Hide remnants below the portal.
+	e.WorkAttr[7*32+20] = 0x00
+}
+
+// stepFinalEnding advances the swordfish ending one logic frame.
+func (e *GameEnv) stepFinalEnding() {
+	switch e.FinalPhase {
+	case finalPhaseCelebrate:
+		// Hold the swordfish/Willy scene for ~6 seconds while the
+		// celebratory tone plays. Original ($8A91): D goes 50→1 with a
+		// 256-iteration inner C-loop per D; the inner DJNZ averages
+		// ~1735 T-states giving 256 × 50 × 1735 ≈ 22.2M T-states ≈ 6.3s
+		// at 3.5 MHz. We hold for 96 logic frames (6.0s at 16 FPS).
+		// Pitch sweeps cyclically through ~80..280 for the warble feel
+		// of the original (where B = (C+3D) mod 256 sweeps each D round).
+		e.SoundRequest = 1
+		e.SoundPitch = 80 + (e.FinalCounter*13)%200
+		e.FinalCounter++
+		if e.FinalCounter >= 96 {
+			e.FinalPhase = finalPhaseColors
+			e.FinalCounter = 0
+		}
+
+	case finalPhaseColors:
+		// INK/PAPER cycle. Original ($8AB7) walks A from 63 down to 1 in tight
+		// loop; we step ~9 values per frame to land on 1 by frame 6.
+		base := 0x3F - e.FinalCounter*9
+		if base < 1 {
+			base = 1
+		}
+		attr := byte(base)
+		for i := range e.WorkAttr {
+			e.WorkAttr[i] = attr
+		}
+		e.SoundRequest = 0
+		e.FinalCounter++
+		if e.FinalCounter >= 7 {
+			e.FinalPhase = finalPhaseDrain
+			e.FinalCounter = 0
+		}
+
+	case finalPhaseDrain:
+		// Air drains, each tick adding 1 to the score. Original ($8AD3) runs
+		// this in a tight CPU loop after the colour cycle. We step one air
+		// unit per logic frame for an audible cadence.
+		if e.Air <= 0x24 {
+			e.FinalPhase = finalPhaseDone
+			e.SoundRequest = 0
+			return
+		}
+		e.Air--
+		entity.AddToScore(e.Score[:], 9, 1)
+		// Pitch from original ($8ADA): D = 2*(63 - S) where S = (CPL air) AND $3F.
+		s := int((^e.Air) & 0x3F)
+		e.SoundRequest = 1
+		e.SoundPitch = s * 2
+
+	case finalPhaseDone:
+		// Restart at Central Cavern. Score and lives persist (matches
+		// the original — no score reset between game loops).
+		e.SoundRequest = 0
+		e.Reset(0)
+	}
 }
 
 func (e *GameEnv) buildObservation() Observation {

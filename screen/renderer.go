@@ -97,3 +97,4 @@ func (r *Renderer) RenderBuffer(target *ebiten.Image, attrs []byte, pixels []byt
 		}
 	}
 }
+

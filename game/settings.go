@@ -22,13 +22,14 @@ const (
 	settingsItemControls1 = 1 // Arrows + Space
 	settingsItemControls2 = 2 // O/P + Space
 	settingsItemInfLives  = 3
-	settingsItemInfAir    = 4
-	settingsItemHarmless  = 5
-	settingsItemNoNasties = 6
-	settingsItemNoGuards  = 7
-	settingsItemWarp      = 8
-	settingsItemName      = 9
-	settingsItemCount     = 10
+	settingsItemInvuln    = 4
+	settingsItemInfAir    = 5
+	settingsItemHarmless  = 6
+	settingsItemNoNasties = 7
+	settingsItemNoGuards  = 8
+	settingsItemWarp      = 9
+	settingsItemName      = 10
+	settingsItemCount     = 11
 )
 
 func newSettingsScreen() *SettingsScreen {
@@ -74,6 +75,8 @@ func (s *SettingsScreen) update(cfg *config.Config) bool {
 			cfg.ControlScheme = config.ControlOP
 		case settingsItemInfLives:
 			cfg.Features.InfiniteLives = !cfg.Features.InfiniteLives
+		case settingsItemInvuln:
+			cfg.Features.Invulnerable = !cfg.Features.Invulnerable
 		case settingsItemInfAir:
 			cfg.Features.InfiniteAir = !cfg.Features.InfiniteAir
 		case settingsItemHarmless:
@@ -182,6 +185,7 @@ func (s *SettingsScreen) draw(display *ebiten.Image, cfg *config.Config, frameCo
 		item  int
 	}{
 		{"Infinite Lives", cfg.Features.InfiniteLives, settingsItemInfLives},
+		{"Invulnerable", cfg.Features.Invulnerable, settingsItemInvuln},
 		{"Infinite Air", cfg.Features.InfiniteAir, settingsItemInfAir},
 		{"Harmless Heights", cfg.Features.HarmlessHeights, settingsItemHarmless},
 		{"No Nasties", cfg.Features.NoNasties, settingsItemNoNasties},
